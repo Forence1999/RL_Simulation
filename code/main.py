@@ -40,7 +40,7 @@ class RL_game():
                 num_step += 1
                 action = self.agent.choose_action(state)
                 state_, reward, done, info = self.env.step(action)
-                self.agent.learn(state, action, reward, state_, done)
+                # self.agent.learn(state, action, reward, state_, done)
                 state = state_
                 reward_history.append(reward)
                 
@@ -57,14 +57,15 @@ class RL_game():
         curve_data = [episode_reward, ]
         color = ['r', ]
         # name = 'Pre-trained Actor Classifier'
-        # name = 'Pre-trained Actor Classifier - without learning'
+        name = 'Pre-trained Actor Classifier - without learning'
         # name = 'Randomly initialized Actor Classifier - 1'
         # name = 'Randomly initialized Actor Classifier - 2'
-        name = 'Randomly initialized Actor Classifier - 3'
+        # name = 'Randomly initialized Actor Classifier - 3'
         title = 'Episode-wise training reward - ' + name
         img_path = './' + name + '.jpg'
         plot_curve(data=list(zip(curve_name, curve_data, color)), title=title, img_path=img_path, linewidth=0.5)
         print('Name: ', name)
+        np.savez('./' + name + '.npz', data=episode_reward)
 
 
 if __name__ == '__main__':

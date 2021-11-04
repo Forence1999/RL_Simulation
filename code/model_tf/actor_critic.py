@@ -56,20 +56,19 @@ class ActorCriticNetwork(keras.Model):
         for i, layer in enumerate(feature_extraction.layers):
             layer.trainable = False
         
-        # if base_model.output_shape[-1] != self.num_action:
-        #     warnings.warn('The output_shape of base_model is different from num_action!\
-        #          Randomly initialized parameters will be used!')
-        dense = Dense(self.num_action, name='action_dense', kernel_constraint=max_norm(norm_rate)
-                      )(feature_extraction.output)
-        action_pred = Activation('softmax', name='softmax')(dense)
-        # else:Z
-        #     base_model.get_layer('dense').name = 'action_dense'
-            # action_pred = base_model.output
+        if base_model.output_shape[-1] != self.num_action:
+            warnings.warn('The output_shape of base_model is different from num_action!\
+                 Randomly initialized parameters will be used!')
+            dense = Dense(self.num_action, name='action_dense', kernel_constraint=max_norm(norm_rate)
+                          )(feature_extraction.output)
+            action_pred = Activation('softmax', name='softmax')(dense)
+        else:
+            action_pred = base_model.output
         value_pred = Dense(1, name='value_dense', kernel_constraint=max_norm(norm_rate))(feature_extraction.output)
         ac_model = Model(inputs=base_model.input, outputs=[value_pred, action_pred, ])
         print('-' * 20, ac_model, '-' * 20, )
         ac_model.summary()
-
+        
         return ac_model
     
     def __load_ac_model__(self):
