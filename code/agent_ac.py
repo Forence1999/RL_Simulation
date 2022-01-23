@@ -27,9 +27,9 @@ import warnings
 from model_tf.actor_critic import ActorCriticNetwork
 
 
-class Agent:
+class AC_Agent:
     def __init__(self, alpha=1., gamma=0.99, num_action=8, ac_model_dir='../model/ac_model', load_ac_model=False):
-        super(Agent, self).__init__()
+        super(AC_Agent, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
         self.action = None
@@ -109,5 +109,5 @@ class ReplayMemory():  # .定义经验池（队列）
 
 if __name__ == '__main__':
     
-    agent = Agent()
+    agent = AC_Agent()
     print('Hello World!')

@@ -46,7 +46,7 @@ class Agent(object):
 
     def choose_action(self, observation):
         state = observation[np.newaxis, :]
-        probabilities = self.policy.predict(state)[0]
+        probabilities = self.policy.predict()[0]
         action = np.random.choice(self.action_space, p=probabilities)
 
         return action
@@ -54,8 +54,8 @@ class Agent(object):
     def learn(self, state, action, reward, state_, done):
         state = state[np.newaxis,:]
         state_ = state_[np.newaxis,:]
-        critic_value_ = self.critic.predict(state_)
-        critic_value = self.critic.predict(state)
+        critic_value_ = self.critic.predict()
+        critic_value = self.critic.predict()
 
         target = reward + self.gamma*critic_value_*(1-int(done))
         delta =  target - critic_value

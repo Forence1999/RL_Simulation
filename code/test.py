@@ -4,6 +4,8 @@ import networkx as nx
 from lib.utils import plot_curve
 
 if __name__ == '__main__':
+    ### plot curve
+    
     # name = 'Pre-trained Actor Classifier'
     # name = 'Pre-trained Actor Classifier - without learning'
     # name = 'Randomly initialized Actor Classifier - 1'

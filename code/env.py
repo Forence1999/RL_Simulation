@@ -18,9 +18,9 @@ import pickle
 
 
 class MAP_ENV():
-    def __init__(self, ):
+    def __init__(self, ds_path):
         super(MAP_ENV, self).__init__()
-        self.ds_path = '../data/4F_CYC/256ms_0.13_400_16000/norm_drop_denoised_norm_ini_hann_dict_gcc_phat_128.pkl'
+        self.ds_path = ds_path
         self.map = Map_graph(ds_path=self.ds_path)
         self.epochs = 1000
         self.num_actions = 8
@@ -90,7 +90,7 @@ class MAP_ENV():
             print('str_doa', str(rela_doa * 45))
             print('Wait')
         # state = np.random.choice(state_ls.values(), 1)[0]  # TODO
-        state = random.sample(list(state_ls.values()), 1)
+        state = random.sample(list(state_ls.values()), 1)[0]
         return state
     
     def reset(self):
@@ -100,7 +100,7 @@ class MAP_ENV():
         self.state = self.get_state(self.src_id[-1], self.wk_id, self.abs_doa)
         self.done = (len(self.src_id) == 0)
         
-        return self.state, self.done
+        return np.array([self.state]), self.done
     
     def next_position(self, id, abs_action):
         next_id = None
@@ -151,7 +151,7 @@ class MAP_ENV():
         
         if len(self.src_id) == 0:
             done = True
-            reward += 100
+            reward += 1
             state_ = None
         else:
             done = False
@@ -160,11 +160,22 @@ class MAP_ENV():
         
         self.state = state_
         info = None
-        return state_, reward, done, info
+        return np.array([state_]), reward, done, info
     
     def render(self):
         pass
 
+    def cal_relative_doa(self, src_id, wk_id, abs_doa, ):
+        '''
+
+        :param src_id:
+        :param wk_id:
+        :param abs_doa:
+        :return:
+        '''
+        src_2_wk_doa = self.find_relative_direction(src_id, wk_id)
+        rela_doa = (src_2_wk_doa - abs_doa + 2 + 16) % 8
+        return rela_doa
 
 if __name__ == '__main__':
     map_env = MAP_ENV()

@@ -4,7 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from PIL import Image
-import cv2
+import random
+from collections import Counter
 
 
 def next_greater_power_of_2(x):
@@ -15,7 +16,36 @@ def next_lower_power_of_2(x):
     return 2 ** ((int(x) - 1).bit_length() - 1)
 
 
+def set_random_seed(seed=0, fix_np=False, fix_tf=False, fix_torch=False, ):
+    ''' setting random seed '''
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    if fix_np:
+        np.random.seed(seed)
+    if fix_tf:
+        import tensorflow as tf
+        tf.random.set_seed(seed)
+    if fix_torch:
+        import torch
+        import torch.backends.cudnn as cudnn
+        
+        torch.manual_seed(seed)
+        cudnn.deterministic = True
+        print('Warning:', 'You have chosen to seed training. '
+                          'This will turn on the CUDNN deterministic setting, '
+                          'which can slow down your training considerably! '
+                          'You may see unexpected behavior when restarting '
+                          'from checkpoints.')
+
+
 def add_prefix_and_suffix_4_basename(path, prefix=None, suffix=None):
+    '''
+    add prefix and/or suffix string(s) to a path's basename
+    :param path:
+    :param prefix:
+    :param suffix:
+    :return:
+    '''
     dir_path, basename = os.path.split(path)
     filename, ext = os.path.splitext(basename)
     filename = str(prefix if prefix is not None else '') + filename + str(suffix if suffix is not None else '') + ext
@@ -27,16 +57,16 @@ def standard_normalizaion(x):
     return (x - np.mean(x)) / np.std(x)
 
 
-def wise_standard_normalizaion(data, normalization=None):
+def standard_normalization_wise(data, normalization=None):
+    ''' channel-first '''
     data = np.array(data)
     if normalization is None:
         return data
-    assert normalization in ['sample-wise', 'channel-wise', 'samplepoint-wise']
-    data_ndim = data.ndim
-    if data_ndim == 2:
-        data = data[np.newaxis,]
+    assert normalization in ['whole', 'sample-wise', 'channel-wise', 'samplepoint-wise']
     for i in range(len(data)):
-        if normalization == 'sample-wise':
+        if normalization == 'whole':
+            data = standard_normalizaion(data)
+        elif normalization == 'sample-wise':
             data[i, :, :] = standard_normalizaion(data[i, :, :])
         elif normalization == 'channel-wise':
             data[i, :, :] = [standard_normalizaion(data[i, j, :]) for j in range(data.shape[-2])]
@@ -44,9 +74,7 @@ def wise_standard_normalizaion(data, normalization=None):
             data[i, :, :] = np.array([standard_normalizaion(data[i, :, j]) for j in range(data.shape[-1])]).T
         else:
             print('-' * 20, 'normalization is incorrectly assigned', '-' * 20)
-            exit(1)
-    if data_ndim == 2:
-        return np.array(data)[0]
+    
     return np.array(data)
 
 
@@ -116,6 +144,61 @@ def get_shuffle_index(data_size, random_seed=None):
     if random_seed is not None:
         np.random.seed(random_seed)
     return np.random.permutation(np.arange(data_size))
+
+
+def gen_cross_val_idx(num_sbj, num_fold, num_subfold, random_seed=None, ):
+    if random_seed is not None:
+        os.environ["PYTHONHASHSEED"] = str(random_seed)
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+    
+    sbj_rand_idx = get_shuffle_index(num_sbj)
+    split_ds_idx = [sbj_rand_idx[i::num_fold] for i in range(num_fold)] * num_fold
+    
+    all_split_fold = []
+    for i in range(num_fold):
+        train_idx = split_ds_idx[i:i + num_subfold[0]]
+        val_idx = split_ds_idx[i + num_subfold[0]:i + num_subfold[0] + num_subfold[1]]
+        test_idx = split_ds_idx[
+                   i + num_subfold[0] + num_subfold[1]:i + num_subfold[0] + num_subfold[1] + num_subfold[2]]
+        train_idx = sorted(np.concatenate(train_idx) if num_subfold[0] > 1 else train_idx[0])  #
+        val_idx = sorted(np.concatenate(val_idx) if num_subfold[1] > 1 else val_idx[0])  #
+        test_idx = sorted(np.concatenate(test_idx) if num_subfold[2] > 1 else test_idx[0])  #
+        all_split_fold.append([train_idx, val_idx, test_idx])
+    return all_split_fold
+
+
+def statistic_label_proportion(train_y, val_y, test_y, do_print=True):
+    train_y, val_y, test_y, = np.array(train_y), np.array(val_y), np.array(test_y),
+    if train_y.ndim > 1:
+        train_y = np.argmax(train_y, axis=-1)
+    if val_y.ndim > 1:
+        val_y = np.argmax(val_y, axis=-1)
+    if test_y.ndim > 1:
+        test_y = np.argmax(test_y, axis=-1)
+    total_y = np.concatenate((train_y, val_y, test_y), axis=0)
+    train, val, test, total = Counter(train_y), Counter(val_y), Counter(test_y), Counter(total_y)
+    
+    keys = sorted(np.unique(total_y))
+    func = lambda key, dict: dict[key] if key in dict.keys() else 0
+    sorted_train = [func(key, train) for key in keys]
+    sorted_val = [func(key, val) for key in keys]
+    sorted_test = [func(key, test) for key in keys]
+    sorted_total = [func(key, total) for key in keys]
+    if do_print:
+        print('\n', '-' * 20, 'Statistical info of dataset labels', '-' * 20)
+        print('label: ', keys, )
+        print('train: ', sorted_train, )
+        print('val:   ', sorted_val, )
+        print('test:  ', sorted_test, )
+        print('total: ', sorted_total, )
+    
+    return {
+        'train': sorted_train,
+        'val'  : sorted_val,
+        'test' : sorted_test,
+        'total': sorted_total,
+    }
 
 
 def bca(y_true, y_pred):
@@ -215,6 +298,44 @@ def calculate_accuracy(y, y_pred, target_id=None):
         return accuracy, accuracy_nb
 
 
+def calculate_class_weighted_accuracy(y, y_pred, class_weight=None):
+    """
+    Computes the accuracy as well as num_adv of attack of the target class.
+
+    Args:
+        y: ground truth labels. Accepts one hot encodings or labels.
+        y_pred: predicted labels. Accepts probabilities or labels.
+        class_weight: dictionary mapping class indices (integers) to a weight (float) value
+    Returns:
+        accuracy
+        accuracy_nb: number of samples which are classified correctly
+        target_rate:
+        target_total: number of samples which changed their labels from others to target_id
+    """
+    y = checked_argmax(y, to_numpy=True)  # tf.argmax(y, axis=-1).numpy()
+    y_pred = checked_argmax(y_pred, to_numpy=True)  # tf.argmax(y_pred, axis=-1).numpy()
+    if class_weight is None:
+        acc = np.mean(np.equal(y, y_pred))
+        acc_num = np.sum(np.equal(y, y_pred))
+        
+        return {
+            'acc'    : acc,
+            'acc_num': acc_num
+        }
+    else:
+        total = np.sum(list(class_weight.values()))
+        for key in list(class_weight.keys()):
+            class_weight[key] = class_weight[key] / total
+        
+        weighted_acc = 0
+        for key in list(class_weight.keys()):
+            key_idx = (y == key)
+            key_total = np.sum((y_pred[key_idx] == key))
+            weighted_acc += key_total / np.sum(key_idx) * class_weight[key]
+        
+        return weighted_acc
+
+
 def checked_argmax(y, to_numpy=False):
     """
     Performs an argmax after checking if the input is either a tensor
@@ -244,7 +365,7 @@ def extract_nb_from_str(str):
     return list(map(int, res))
 
 
-def get_files_by_suffix(root, suffix):
+def get_files_by_suffix(root, suffix=''):
     if isinstance(suffix, str):
         suffix = (suffix,)
     else:
@@ -259,7 +380,7 @@ def get_files_by_suffix(root, suffix):
     return file_list
 
 
-def get_files_by_prefix(root, prefix):
+def get_files_by_prefix(root, prefix=''):
     if isinstance(prefix, str):
         prefix = (prefix,)
     else:
@@ -274,7 +395,7 @@ def get_files_by_prefix(root, prefix):
     return file_list
 
 
-def get_dirs_by_suffix(root, suffix):
+def get_dirs_by_suffix(root, suffix=''):
     if isinstance(suffix, str):
         suffix = (suffix,)
     else:
@@ -289,7 +410,7 @@ def get_dirs_by_suffix(root, suffix):
     return dir_list
 
 
-def get_dirs_by_prefix(root, prefix):
+def get_dirs_by_prefix(root, prefix=''):
     if isinstance(prefix, str):
         prefix = (prefix,)
     else:
@@ -301,6 +422,67 @@ def get_dirs_by_prefix(root, prefix):
             if d.startswith(prefix):
                 path = os.path.normpath(os.path.join(parent, d))
                 dir_list.append(path)
+    return dir_list
+
+
+def get_subfiles_by_suffix(root, suffix=''):
+    if isinstance(suffix, str):
+        suffix = (suffix,)
+    else:
+        suffix = tuple(suffix)
+    
+    file_list = []
+    for file_basename in os.listdir(root):
+        fpath = os.path.join(root, file_basename)
+        if os.path.isfile(fpath) and file_basename.endswith(suffix):
+            # img: (('.jpg', '.bmp', '.dib', '.png', '.jpg', '.jpeg', '.pbm', '.pgm', '.ppm', '.tif', '.tiff')):
+            path = os.path.normpath(fpath)
+            file_list.append(path)
+    return file_list
+
+
+def get_subfiles_by_prefix(root, prefix=''):
+    if isinstance(prefix, str):
+        prefix = (prefix,)
+    else:
+        prefix = tuple(prefix)
+    
+    file_list = []
+    for file_basename in os.listdir(root):
+        fpath = os.path.join(root, file_basename)
+        if os.path.isfile(fpath) and file_basename.startswith(prefix):
+            path = os.path.normpath(fpath)
+            file_list.append(path)
+    return file_list
+
+
+def get_subdirs_by_suffix(root, suffix=''):
+    if isinstance(suffix, str):
+        suffix = (suffix,)
+    else:
+        suffix = tuple(suffix)
+    
+    dir_list = []
+    for dir_basename in os.listdir(root):
+        dpath = os.path.join(root, dir_basename)
+        if os.path.isdir(dpath) and dir_basename.endswith(suffix):
+            path = os.path.normpath(dpath)
+            dir_list.append(path)
+    return dir_list
+
+
+def get_subdirs_by_prefix(root, prefix=''):
+    if isinstance(prefix, str):
+        prefix = (prefix,)
+    else:
+        prefix = tuple(prefix)
+    
+    dir_list = []
+    for dir_basename in os.listdir(root):
+        dpath = os.path.join(root, dir_basename)
+        if os.path.isdir(dpath) and dir_basename.startswith(prefix):
+            path = os.path.normpath(dpath)
+            dir_list.append(path)
     return dir_list
 
 
@@ -324,8 +506,7 @@ def plot_curve(data, title=None, img_path=None, show=True, y_lim=None, linestyle
     plt.title(title)
     plt.legend()
     if img_path is not None:
-        if not os.path.exists(os.path.dirname(img_path)):
-            os.mkdir(os.path.dirname(img_path))
+        os.makedirs(os.path.dirname(img_path), exist_ok=True)
         plt.savefig(img_path)
     if show:
         plt.show()
@@ -358,6 +539,51 @@ def plot_hist(data, title=None, img_path=None, bins=100, show=True):
         plt.close()
 
 
+def plot_multi_bars(data, color=None, title=None, x_labels=None, y_label=None, y_lim=None, tick_step=1.,
+                    group_gap=0.2,
+                    bar_gap=0., plt_show=True, value_show=True, dpi=300, value_fontsize=5, value_interval=0.01,
+                    value_format='%.2f', save_path=None):
+    '''
+    x_labels: x轴坐标标签序列
+    data: 二维列表，每一行为同一颜色的各个bar值，每一列为同一个横坐标的各个bar值
+    tick_step: 默认x轴刻度步长为1，通过tick_step可调整x轴刻度步长。
+    group_gap: 组与组之间的间隙，最好为正值，否则组与组之间重叠
+    bar_gap ：每组中柱子间的空隙，默认为0，每组柱子紧挨，正值每组柱子之间有间隙，负值每组柱子之间重叠
+    '''
+    data = np.asarray(data)
+    bar_per_group_num = len(data[0])
+    if color is not None:
+        assert len(color) >= bar_per_group_num
+    x_ticks = np.arange(bar_per_group_num) * tick_step
+    group_num = len(data)
+    group_width = tick_step - group_gap
+    bar_span = group_width / group_num  # 组内每个bar的宽度
+    bar_width = bar_span - bar_gap
+    baseline_x = x_ticks - (group_width - bar_span) / 2  # baseline_x为每组柱子第一个柱子的基准x轴位置
+    plt.figure(dpi=dpi)
+    for index, y in enumerate(data):
+        x = baseline_x + index * bar_span
+        if color is not None:
+            plt.bar(x, y, bar_width, color=color[index])
+        else:
+            plt.bar(x, y, bar_width)
+        if value_show:
+            for x0, y0 in zip(x, y):
+                plt.text(x0, y0 + value_interval, value_format % y0, ha='center', va='bottom', fontsize=value_fontsize)
+    if title is not None:
+        plt.title(title)
+    if x_labels is not None:
+        plt.xticks(x_ticks, x_labels)
+    if y_label is not None:
+        plt.ylabel(y_label)
+    if y_lim is not None:
+        plt.ylim(y_lim)
+    if save_path is not None:
+        plt.savefig(save_path)
+    if plt_show:
+        plt.show()
+
+
 def img_splice(img_paths, save_path, sgl_img_size):
     '''
     img_paths: 2-D list storing the paths of images
@@ -380,14 +606,23 @@ def img_splice(img_paths, save_path, sgl_img_size):
 
 
 def otsu_threshold(data):
+    import cv2
     data = np.array([data], dtype=np.uint8)
     threshold, res_data, = cv2.threshold(data, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return res_data[0], threshold
 
 
-if __name__ == '__main__':
-    dir = 'G:\SmartWalker\SmartWalker-master\SoundSourceLocalization'
-    file = 'G:\SmartWalker\SmartWalker-master\SoundSourceLocalization\lib//audiolib.py'
+def load_csv_columns(csv_path, name_ls, header=0, index_col=0):
+    import pandas as pd
+    df = pd.read_csv(csv_path, header=header, index_col=index_col)
     
-    print(add_prefix_and_suffix_4_basename(dir, 13, 14))
-    print(add_prefix_and_suffix_4_basename(file, 13, 14))
+    return [list(df[name]) for name in name_ls]
+
+
+def save_to_csv(path, data, index=None, columns=None, dtype=None, copy=None, ):
+    import pandas as pd
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    dataframe = pd.DataFrame(data=data, index=index, columns=columns, dtype=dtype, copy=copy, )
+    dataframe.to_csv(path, sep=',', )
+    
+    return True
