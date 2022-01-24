@@ -312,7 +312,14 @@ if __name__ == '__main__':
     
     print('Hello World!')
     
+    import matplotlib.pyplot as plt
+    
     ds_path = '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
     map_graph = Map_graph(ds_path=ds_path)
+    pos_dict = dict(enumerate(map_graph.coordinates))
+    
+    fig, ax = plt.subplots()
+    nx.draw(map_graph.map_graph, ax=ax, with_labels=True, pos=pos_dict)
+    plt.show()
     
     print('Brand-new World!')
