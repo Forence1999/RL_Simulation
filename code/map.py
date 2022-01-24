@@ -56,13 +56,15 @@ class Map_graph(object):
                        [160, 320],  # 2
                        [340, 425],  # 3
                        [530, 320],  # 4
-                       [215, 220],  # 5
+                       # [215, 220],  # 5
+                       [None, None],  # 5
                        [170, 160],  # 6
                        [220, 100],  # 7
                        [280, 160],  # 8
                        [220, 15],  # 9
                        [460, 15],  # 10
-                       [420, 220],  # 11
+                       # [420, 220],  # 11
+                       [None, None],  # 11
                        [160, 425],  # 12
                        [530, 425],  # 13
                        [280, 220],  # 14
@@ -143,7 +145,7 @@ class Map_graph(object):
         :return:
         '''
         # cal_data_adjacency_list
-        self.data_adj_ls = np.full((self.num_node, self.num_node), False)
+        data_adj_ls = np.full((self.num_node, self.num_node), False)
         for src_key in self.ds_info.keys():
             src_coord = list(map(int, src_key.split('_')[1:3]))
             src_idx = np.where(np.all(self.coordinates == [src_coord], axis=-1))[0][0]
@@ -151,20 +153,20 @@ class Map_graph(object):
                 wk_coord = list(map(int, wk_key.split('_')[1:3]))
                 wk_coord = [wk_coord[0], wk_coord[-1]]
                 wk_idx = np.where(np.all(self.coordinates == [wk_coord], axis=-1))[0][0]
-                # self.data_adj_ls[src_idx][wk_idx] = True
-                path = self.find_shortest_map_path(src_id=src_idx, wk_id=wk_idx)
-                for i in path:  # TODO: put every node in the path to data_adj_ls???
-                    self.data_adj_ls[src_idx][i] = True
-        self.data_adj_ls[np.diag_indices_from(self.data_adj_ls)] = False
+                data_adj_ls[src_idx][wk_idx] = True
+                # path = self.find_shortest_map_path(src_id=src_idx, wk_id=wk_idx)
+                # for i in path:  # TODO: put every node in the path to data_adj_ls???
+                #     self.data_adj_ls[src_idx][i] = True
+        data_adj_ls[np.diag_indices_from(data_adj_ls)] = False
         
         print('-' * 20, 'Data graph', '-' * 20, )
-        for src_id, adj_ls in enumerate(self.data_adj_ls):
+        for src_id, adj_ls in enumerate(data_adj_ls):
             wk_ids = np.where(adj_ls)[0]
             if len(wk_ids) > 0:
                 print('src:', src_id, '-' * 4, 'wk:', np.where(adj_ls)[0])
         print('-' * 20, 'Finish printing graph', '-' * 20, )
         
-        return self.data_adj_ls
+        return data_adj_ls
     
     def construct_data_graph(self, ):  # src -> wk
         '''
@@ -205,7 +207,8 @@ class Map_graph(object):
     
     def find_shortest_map_path(self, src_id, wk_id, ):
         '''
-        return the shortest path from the src_id to the wk_id
+        return the shortest path from the src_id to the wk_id.
+        And the first and last nodes are src_id and wk_id respectively.
         :param src_id:
         :param wk_id:
         :return:
@@ -272,21 +275,18 @@ class Map_graph(object):
         '''
         return self.nodes[id].get_coordinate()
     
-    def random_src_id(self, ):
+    def random_id(self, src_id=None, ):
         '''
-        return a src_id randomly.
-        :return:
-        '''
-        return np.random.choice(self.src_ids, 1)[0]
-    
-    def random_wk_id(self, src_id, ):
-        '''
-        return one walker_id from src_id's data_children randomly
+        if src_id is None: return an id randomly.
+        else: return one walker_id from src_id's data_children randomly
         :param src_id:
         :return:
         '''
-        children = np.where(self.data_adj_ls[src_id], )[0]
-        return np.random.choice(children, 1)[0]
+        if src_id is None:
+            return np.random.choice(self.src_ids, 1)[0]
+        else:
+            children = np.where(self.data_adj_ls[src_id], )[0]
+            return np.random.choice(children, 1)[0]
     
     def random_doa(self, ):
         '''
@@ -294,7 +294,6 @@ class Map_graph(object):
         :return:
         '''
         return np.random.choice(np.arange(8), 1)[0]
-    
 
 
 if __name__ == '__main__':
@@ -311,5 +310,9 @@ if __name__ == '__main__':
     # np.savez('./adjacency_list.npz', adjacency_list=adjacency_list)
     # print(adjacency_list)
     
+    print('Hello World!')
+    
     ds_path = '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
     map_graph = Map_graph(ds_path=ds_path)
+    
+    print('Brand-new World!')

@@ -15,168 +15,172 @@ import numpy as np
 from copy import deepcopy
 from map import Map_graph
 import pickle
+from lib import utils
 
 
-class MAP_ENV():
-    def __init__(self, ds_path):
+class MAP_ENV(object):
+    def __init__(self, ds_path, ):
         super(MAP_ENV, self).__init__()
         self.ds_path = ds_path
         self.map = Map_graph(ds_path=self.ds_path)
-        self.epochs = 1000
         self.num_actions = 8
+        
         self.src_id = None
         self.wk_id = None
         self.abs_doa = None
-        self.state = None
         self.done = None
-        
-        with open(self.ds_path, 'rb') as fo:
-            ds = pickle.load(fo)
-        self.dataset = ds['dataset']
-        del ds
     
-    def get_state(self, src_id, wk_id, abs_doa):
-        rela_doa = self.map.cal_relative_doa(src_id, wk_id, abs_doa)
-        src_coord = self.map.get_coordinate(src_id)
-        src_key = '_'.join(list(map(str, src_coord)))
-        wk_coord = self.map.get_coordinate(wk_id)
-        wk_coord = np.insert(wk_coord, 1, [1], axis=0)
-        wk_key = '_'.join(list(map(str, wk_coord)))
-        
-        state_ls = None
-        if wk_key in self.dataset[src_key].keys():
-            # print('src_key', src_key, 'wk_key', wk_key)
-            str_doa = str(rela_doa * 45)
-            if str_doa in self.dataset[src_key][wk_key].keys():
-                state_ls = self.dataset[src_key][wk_key][str_doa]
-            else:
-                for i in range(self.num_actions // 2 + 1):
-                    doa_ls = list({(rela_doa + i + self.num_actions) % self.num_actions,
-                                   (rela_doa - i + self.num_actions) % self.num_actions, })
-                    # print('src_key', src_key, 'wk_key', wk_key)
-                    # print('doa: ', self.dataset[src_key][wk_key].keys())
-                    # print('doa_ls: ', doa_ls)
-                    str_doa_ls = [str(j * 45) for j in doa_ls if str(j * 45) in self.dataset[src_key][wk_key].keys()]
-                    if len(str_doa_ls) > 0:
-                        str_doa = np.random.choice(str_doa_ls, 1)[0]
-                        state_ls = self.dataset[src_key][wk_key][str_doa]
-                        break
-        else:
-            path = self.map.find_shortest_map_path(src_id, wk_id, )
-            rela_dir = self.map.find_relative_direction(path[-1], path[-2])
-            sub_wk_id = self.map.find_id_by_direction(wk_id, rela_dir)
-            sub_wk_coord = self.map.get_coordinate(sub_wk_id)
-            sub_wk_coord = np.insert(sub_wk_coord, 1, [1], axis=0)
-            sub_wk_key = '_'.join(list(map(str, sub_wk_coord)))
-            # print('src_key', src_key, 'wk_key', sub_wk_key)
-            
-            str_doa = str(rela_doa * 45)
-            if str_doa in self.dataset[src_key][sub_wk_key].keys():
-                state_ls = self.dataset[src_key][sub_wk_key][str_doa]
-            else:
-                for i in range(self.num_actions // 2 + 1):
-                    doa_ls = list({(rela_doa + i + self.num_actions) % self.num_actions,
-                                   (rela_doa - i + self.num_actions) % self.num_actions, })
-                    str_doa_ls = [str(j * 45) for j in doa_ls if
-                                  str(j * 45) in self.dataset[src_key][sub_wk_key].keys()]
-                    if len(str_doa_ls) > 0:
-                        str_doa = np.random.choice(str_doa_ls, 1)[0]
-                        state_ls = self.dataset[src_key][sub_wk_key][str_doa]
-                        break
-        if state_ls is None:
-            print('src_key 550_15 wk_key 280_1_15  doa:', self.dataset['550_15']['280_1_15'].keys())
-            print('src_key', src_key, 'wk_key', wk_key)
-            print('src_key', src_key, 'wk_key', sub_wk_key)
-            print('str_doa', str(rela_doa * 45))
-            print('Wait')
-        # state = np.random.choice(state_ls.values(), 1)[0]  # TODO
-        state = random.sample(list(state_ls.values()), 1)[0]
-        return state
-    
-    def reset(self):
-        self.src_id = [self.map.random_src_id()]
-        self.wk_id = self.map.random_wk_id(src_id=self.src_id[-1])
-        self.abs_doa = self.map.random_doa()
-        self.state = self.get_state(self.src_id[-1], self.wk_id, self.abs_doa)
-        self.done = (len(self.src_id) == 0)
-        
-        return np.array([self.state]), self.done
-    
-    def next_position(self, id, abs_action):
-        next_id = None
-        for i in range(self.num_actions // 2 + 1):
-            doa_ls = list({(abs_action + i + self.num_actions) % self.num_actions,
-                           (abs_action - i + self.num_actions) % self.num_actions, })
-            id_ls = self.map.nodes[id].get_neighbor()[doa_ls]
-            id_ls = np.array(id_ls)
-            id_ls = id_ls[id_ls != None]
-            if len(id_ls) > 0:
-                next_id = np.random.choice(id_ls, 1)[0]
-                break
-        
-        return next_id
-    
-    def cal_abs_action(self, action):
-        return (action + self.abs_doa - 2 + self.num_actions) % self.num_actions
-    
-    def cal_right_action(self, src_id, wk_id, ):
-        abs_action = self.map.find_relative_direction(src_id, wk_id, )  # TODO
-        return (abs_action - self.abs_doa + 2 + self.num_actions) % self.num_actions
-    
-    def step(self, action):
-        crt_src_id = self.src_id[-1]
-        abs_action = self.cal_abs_action(action)
-        next_id = self.next_position(self.wk_id, abs_action)
-        true_abs_action = self.map.find_relative_direction(next_id, self.wk_id, )
-        right_action = self.cal_right_action(crt_src_id, self.wk_id)
-        if next_id == crt_src_id:
-            self.src_id.pop()
-        elif not self.map.is_data_neighbor(crt_src_id, next_id):
-            intermediary_src = self.map.find_intermediary_src(crt_src_id, next_id)
-            for i in intermediary_src:
-                self.src_id.append(i)
-                if self.map.is_data_neighbor(i, next_id):
-                    break
-        self.wk_id = next_id
-        self.abs_doa = true_abs_action
-        
-        # setting rewards
-        reward = -1
-        if right_action == action:
-            reward += 2
-        elif abs((right_action - action + self.num_actions) % self.num_actions) <= 1:
-            reward += 1
-        else:
-            reward += -1
-        
-        if len(self.src_id) == 0:
-            done = True
-            reward += 1
-            state_ = None
-        else:
-            done = False
-            crt_src_id = self.src_id[-1]
-            state_ = self.get_state(crt_src_id, self.wk_id, self.abs_doa)
-        
-        self.state = state_
-        info = None
-        return np.array([state_]), reward, done, info
-    
-    def render(self):
-        pass
-
-    def cal_relative_doa(self, src_id, wk_id, abs_doa, ):
+    def reset(self, ):
         '''
-
+        for the state of an epoch, reset all the state variables.
+        :return:
+        '''
+        self.src_id = self.map.random_id()
+        while True:
+            self.wk_id = self.map.random_id()
+            if self.src_id != self.wk_id:
+                break
+        self.abs_doa = self.map.random_doa()
+        state = self.get_state(src_id=self.src_id, wk_id=self.wk_id, abs_doa=self.abs_doa)
+        self.done = False
+        
+        return state, self.done
+    
+    def get_relative_doa(self, src_id, wk_id, abs_doa, ):
+        '''
+        get the relative doa of src_id relative to walker (abs_doa and wk_id)
         :param src_id:
         :param wk_id:
         :param abs_doa:
         :return:
         '''
-        src_2_wk_doa = self.find_relative_direction(src_id, wk_id)
-        rela_doa = (src_2_wk_doa - abs_doa + 2 + 16) % 8
+        src_2_wk_doa = self.map.find_relative_direction(src_id=src_id, wk_id=wk_id)
+        rela_doa = (src_2_wk_doa - abs_doa + 8) % 8
         return rela_doa
+    
+    def load_preprocess_state(self, state_path):
+        '''
+        load and preprocess state.
+        :param state:
+        :return:
+        '''
+        state = np.load(state_path)['data'][:, :, 5:].transpose((1, 2, 0))
+        return state
+    
+    def get_state(self, src_id, wk_id, abs_doa, ):
+        '''
+        基于 src_id 和 wk_id 返回 walker 目前所能接收到的状态。 # 接受相邻三个方向的数据
+        若声源相对于小车的数据不存在，则保持小车的位置不变，找到能够覆盖小车数据的离声源最近的次声源，并返回其对 walker 位置的数据。
+        :param src_id:
+        :param wk_id:
+        :param abs_doa: The direction which the walker is facing relative to the absolute coordinate system
+        :return:
+        '''
+        wk_coord = self.map.get_coordinate(wk_id)
+        wk_basename = '_'.join(['walker', ] + list(map(str, wk_coord)) + ['1', ])
+        data_path = self.map.find_shortest_data_path(src_id=src_id, wk_id=wk_id, )
+        sub_src_id = data_path[-2]
+        sub_src_coord = self.map.get_coordinate(sub_src_id)
+        sub_src_basename = '_'.join(['src', ] + list(map(str, sub_src_coord)))
+        rela_doa = self.get_relative_doa(src_id=sub_src_id, wk_id=wk_id, abs_doa=abs_doa)
+        # print('sub_src_key:', sub_src_key, 'wk_key:', wk_key)
+        
+        state_path_ls = None
+        for i in range(2):
+            doa_ls = {(rela_doa + i + self.num_actions) % self.num_actions,
+                      (rela_doa - i + self.num_actions) % self.num_actions, }
+            for j in doa_ls:
+                str_doa = str(j * 45)
+                doa_data_path = os.path.join(self.ds_path, sub_src_basename, wk_basename, str_doa, )
+                if os.path.exists(doa_data_path):
+                    state_path_ls = utils.get_files_by_suffix(root=doa_data_path, suffix='.npz')
+                    break
+            if state_path_ls is not None:
+                break
+        
+        if state_path_ls is None:
+            print('data_path:', data_path, )
+            print('src_id:', src_id, )
+            print('sub_src_id:', sub_src_id, 'sub_src_basename:', sub_src_basename, )
+            print('wk_id:', wk_id, 'wk_basename:', wk_basename, )
+            print('abs_doa:', abs_doa)
+            print('rela_doa:', rela_doa)
+            raise ValueError('src_walker data does not exist')
+        state_path = random.sample(state_path_ls, 1)[0]
+        state = self.load_preprocess_state(state_path=state_path)
+        return state
+    
+    def next_pose(self, action, ):
+        '''
+        the next position and abs_doa if walker takes the action.
+        If the adjacent 3 direction is not available, walker will staty still.
+        :param action:
+        :return:
+        '''
+        abs_action = self.get_abs_action(action)
+        
+        next_id, next_abs_doa = None, None
+        for i in range(2):
+            doa_ls = list({(abs_action + i + self.num_actions) % self.num_actions,
+                           (abs_action - i + self.num_actions) % self.num_actions, })
+            id_ls = self.map.nodes[self.wk_id].get_neighbor()[doa_ls]
+            doa_node_pair = [(doa, node) for doa, node in enumerate(id_ls) if ((doa in doa_ls) and (node is not None))]
+            # id_ls = np.asarray(id_ls)
+            # id_ls = id_ls[id_ls != None]
+            if len(doa_node_pair) > 0:
+                next_abs_doa, next_id = random.sample(doa_node_pair, 1)[0]
+                break
+        
+        if next_id is None:
+            return False
+        else:
+            self.wk_id, self.abs_doa = next_id, next_abs_doa
+            return True
+    
+    def get_abs_action(self, action, ):
+        '''
+        return the direction walker will face if it takes the action.
+        :param action:
+        :return:
+        '''
+        return (action + self.abs_doa) % self.num_actions
+    
+    def step(self, action, ):
+        '''
+        Ask walker to take the action and update the relevant state variables.
+        :param action:
+        :return:
+        '''
+        doAction = self.next_pose(action=action)
+        
+        # setting rewards
+        reward = -0.1
+        if not doAction:
+            reward -= 0.1
+        
+        if self.src_id == self.wk_id:
+            done = True
+            reward += 1.
+            state_ = None
+        else:
+            done = False
+            state_ = self.get_state(src_id=self.src_id, wk_id=self.wk_id, abs_doa=self.abs_doa)
+        
+        info = None
+        return state_, reward, done, info
+    
+    def render(self, ):
+        '''
+        display the env.
+        :return:
+        '''
+        pass
+
 
 if __name__ == '__main__':
-    map_env = MAP_ENV()
     print('Hello World!')
+    
+    ds_path = '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
+    map_env = MAP_ENV(ds_path=ds_path)
+    map_env.get_state(1, 20, 1)
+    print('Brand-new World!')

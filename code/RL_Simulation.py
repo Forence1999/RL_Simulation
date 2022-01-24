@@ -8,21 +8,22 @@
 # @Software: PyCharm
 import os
 import sys
+import time
 import numpy as np
 from agent_d3qn import DQNAgent
 from env import MAP_ENV
 import tensorflow as tf
-from lib.utils import plot_curve
+from lib import utils
 
 
 class RL_game():
     def __init__(self, num_action=8):
         super(RL_game, self).__init__()
         self.ddqn = True
-        self.Soft_Update = True
-        self.dueling = True
-        self.epsilon_greedy = True
-        self.USE_PER = False
+        self.softUpdate = True
+        self.dueling = False
+        self.eps_decay = True
+        self.usePER = False
         self.episodes = 500
         self.print_interval = 10
         self.max_episode_steps = 50  # 一个episode最多探索多少步，超过则强行终止。
@@ -30,43 +31,49 @@ class RL_game():
         self.lr = 0.00001
         self.num_smooth_reward = 20
         
-        self.name = self.__gen_name__()
-        print('-' * 20, 'Model Name:', self.name, '-' * 20, )
+        self.model_name = self.__gen_name__()
+        print('-' * 20, 'Model Name:', self.model_name, '-' * 20, )
         self.ds_path = '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
         self.env = MAP_ENV(ds_path=self.ds_path)
-        self.agent = DQNAgent(num_action=num_action, ddqn=self.ddqn, Soft_Update=self.Soft_Update, dueling=self.dueling,
-                              epsilon_greedy=self.epsilon_greedy, USE_PER=self.USE_PER, lr=self.lr)
+        self.agent = DQNAgent(num_action=num_action, ddqn=self.ddqn, softUpdate=self.softUpdate, dueling=self.dueling,
+                              eps_decay=self.eps_decay, usePER=self.usePER, lr=self.lr,
+                              d3qn_model_name=self.model_name, )
         self.agent.compile()
     
-    def __gen_name__(self):
-        dueling = 'Dueling_' if self.dueling else ''
+    def __gen_name__(self, ):
+        
+        dueling = 'Dueling' if self.dueling else ''
         dqn = 'DDQN' if self.ddqn else 'DQN'
-        softupdate = '_SoftUpdate' if self.Soft_Update else ''
-        greedy = '_Greedy' if self.epsilon_greedy else ''
-        PER = '_PER' if self.USE_PER else ''
-        lr = '_lr_' + str(self.lr)
-        name = dueling + dqn + softupdate + greedy + PER + lr
+        softUpdate = 'softUpdate' if self.softUpdate else ''
+        eps_decay = 'epsDecay' if self.eps_decay else ''
+        usePER = 'usePER' if self.usePER else ''
+        lr = 'lr_' + str(self.lr)  # TODO
+        time_stamp = time.strftime("%Y%m%d-%H:%M:%S")
+        
+        name = '_'.join((dueling, dqn, softUpdate, eps_decay, usePER, lr, time_stamp)).replace('__', '_')
+        print('-' * 20, 'Model Name:', name, '-' * 20, )
         
         return name
     
     def plot_and_save_rewards(self, reward, ):
-        img_path = './' + self.name + '.jpg'  # TODO: 修改数据和图像保存目录
-        title = 'Episode-wise training reward - ' + self.name
+        img_path = './' + self.model_name + '.jpg'  # TODO: 修改数据和图像保存目录
+        title = 'Episode-wise training reward - ' + self.model_name
         reward = np.array(reward)
         ave_reward = np.convolve(np.ones((self.num_smooth_reward,)) / self.num_smooth_reward,
                                  reward, mode='valid')  # 20步移动平均
         curve_name = ['Training reward', 'Ave_training reward', ]
         curve_data = [reward, ave_reward]
         color = ['r', 'g']
-        plot_curve(data=list(zip(curve_name, curve_data, color)), title=title, img_path=img_path, linewidth=0.5,
-                   show=False)
-        np.savez('./' + self.name + '.npz', data=reward)
+        utils.plot_curve(data=list(zip(curve_name, curve_data, color)), title=title, img_path=img_path, linewidth=0.5,
+                         show=False)
+        np.savez('./' + self.model_name + '.npz', data=reward)
     
-    def play(self):
+    def play(self, ):
         total_step = 0
         episode_reward = []
         for episode_idx in range(self.episodes):
             e_reward = []
+            experience_ls = []
             state, done = self.env.reset()
             num_step = 0
             while not done:
@@ -74,18 +81,20 @@ class RL_game():
                 total_step += 1
                 action, exp_pro = self.agent.act(state, decay_step=total_step)
                 state_, reward, done, info = self.env.step(action)
-                self.agent.remember(state, action, reward, state_, done)
+                experience_ls.append([state, action, reward, state_, done])
                 state = state_
                 e_reward.append(reward)
                 
                 if done:
                     print('Done! Saving model...')
                     self.agent.save_model()
-                self.agent.replay()
                 
                 if num_step >= self.max_episode_steps:
                     break
             episode_reward.append(np.sum(e_reward))
+            self.agent.remember_batch(batch_experience=experience_ls, useDiscount=True)
+            self.agent.replay()
+            
             print('episode: ', episode_idx, '\n',
                   'crt_reward: ', np.around(episode_reward[-1], 3), '\n',
                   'avg_reward_20: ', np.around(

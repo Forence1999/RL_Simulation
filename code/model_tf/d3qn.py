@@ -7,31 +7,20 @@
 # @Time: 2021/10/29/22:54
 # @Software: PyCharm
 import os
-import sys
-import time
-import random
 import numpy as np
-from copy import deepcopy
-import collections
-from collections import defaultdict
 import tensorflow as tf
 import tensorflow.keras as keras
-from tensorflow.keras.optimizers import Adam, RMSprop
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Dense, Activation, Input, Conv2D, Flatten, Lambda, Add
-from tensorflow.keras.constraints import max_norm
-import tensorflow.keras.backend as K
-from tensorflow.keras.utils import plot_model
+from tensorflow.keras.models import Model, Sequential
+
+from tensorflow.keras.layers import Dense, Activation, Input, Conv2D, Flatten, Lambda, Add, BatchNormalization, Reshape
 import tensorflow_probability as tfp
-import warnings
 
 
 class D3QNNetwork(keras.Model):
-    def __init__(self, num_action=8, base_model_dir='../model/base_model', load_d3qn_model=False,
-                 d3qn_model_dir='../model/d3qn_model', norm_rate=0.25, dueling=True, ):
+    def __init__(self, num_action=8, dueling=True, base_model_dir='../../model/base_model',
+                 load_d3qn_model=False, d3qn_model_dir='../../model/d3qn_model', ):
         super(D3QNNetwork, self).__init__()
         self.num_action = num_action
-        self.norm_rate = norm_rate
         self.dueling = dueling
         # init model_dir
         self.base_model_dir = base_model_dir
@@ -41,31 +30,33 @@ class D3QNNetwork(keras.Model):
         if load_d3qn_model:
             self.d3qn_model = self.__load_d3qn_model__()
         else:
-            self.d3qn_model = self.__init_d3qn_model__(self.norm_rate)
+            self.d3qn_model = self.__init_d3qn_model__()
     
-    def __init_d3qn_model__(self, norm_rate):
-        print('-' * 20, 'Initializing a new D3QN model!', '-' * 20, )
+    def __init_d3qn_model__(self, ):
+        print('-' * 20, 'Initializing a new D3QN model...', '-' * 20, )
         base_model = tf.keras.models.load_model(self.base_ckpt_dir)
         print('-' * 20, base_model, '-' * 20, )
         base_model.summary()
-        
-        feature_extraction = Model(inputs=base_model.input, outputs=base_model.get_layer('flatten').output)
+        feature_extraction = Model(inputs=base_model.input, outputs=base_model.get_layer('output_conv').input)
         # sub_model = Model(inputs=base_model.input, outputs=base_model.layers[-2].output)
         
-        for i, layer in enumerate(feature_extraction.layers):
+        for layer in feature_extraction.layers:
             layer.trainable = False
         
         if self.dueling:
-            state_value = Dense(1, )(feature_extraction.output)
-            state_value = Lambda(lambda s: K.expand_dims(s[:, 0], -1), output_shape=(self.num_action,))(state_value)
+            state_value = Conv2D(1, kernel_size=(30, 8), strides=(1, 1), padding='valid', use_bias=True,
+                                 name='value_conv')(feature_extraction.output)
+            state_value = BatchNormalization(axis=-1)(state_value)
+            state_value = Reshape((-1,))(state_value)
+            # state_value = Lambda(lambda s: tf.expand_dims(s[:, 0], -1), output_shape=(self.num_action,))(state_value)
             
-            action_advantage = Dense(self.num_action, )(feature_extraction.output)
+            action_advantage = base_model.get_layer('softmax').input
             # kernel_constraint=max_norm(norm_rate))(feature_extraction.output)
-            action_advantage = Lambda(lambda a: a[:, :] - K.mean(a[:, :], keepdims=True),
-                                      output_shape=(self.num_action,))(action_advantage)
+            # action_advantage = Lambda(lambda a: a[:, :] - tf.mean(a[:, :], keepdims=True),
+            #                           output_shape=(self.num_action,))(action_advantage)
             output = Add()([state_value, action_advantage])
         else:
-            output = Dense(self.num_action, activation="linear", )(feature_extraction.output)
+            output = base_model.get_layer('softmax').input
         
         d3qn_model = Model(inputs=base_model.input, outputs=output)
         
@@ -74,24 +65,25 @@ class D3QNNetwork(keras.Model):
         
         return d3qn_model
     
-    def __load_d3qn_model__(self):
+    def __load_d3qn_model__(self, ):
         try:
-            print('-' * 20, 'Loading pre-trained D3QN model!', '-' * 20, )
-            return tf.keras.models.load_model(self.ac_ckpt_dir)
-        except:
-            print('-' * 20, 'Fail to load the pre-trained D3QN model! Initialized model will be used for D3QN!',
+            print('-' * 20, 'Loading pre-trained D3QN model...', '-' * 20, )
+            return tf.keras.models.load_model(self.d3qn_ckpt_dir)
+        except Exception as e:
+            print('Warning:', e)
+            print('-' * 20, 'Fail to load the pre-trained D3QN model! An initialized model will be used for D3QN!',
                   '-' * 20, )
             return self.__init_d3qn_model__()
     
-    def save_model(self, model_path=None):
+    def save_model(self, model_path=None, ):
         model_path = self.d3qn_ckpt_dir if (model_path is None) else os.path.join(model_path, 'ckpt')
-        print('-' * 20, 'Saving D3QN model to %s!' % model_path, '-' * 20, )
+        print('-' * 20, 'Saving D3QN model to %s...' % model_path, '-' * 20, )
         self.d3qn_model.save(model_path)
     
-    def get_weights(self):
+    def get_weights(self, ):
         return self.d3qn_model.get_weights()
     
-    def set_weights(self, weights):
+    def set_weights(self, weights, ):
         return self.d3qn_model.set_weights(weights)
     
     def compile(self, optimizer='rmsprop', loss=None, metrics=None, **kwargs):
@@ -107,9 +99,22 @@ class D3QNNetwork(keras.Model):
         return self.d3qn_model(state, training=training, **kwargs)
 
 
-### 编写step接口next_obs_batch, reward_batch, done_batch, info_batch =  env.step(actions_batch)
-
 if __name__ == '__main__':
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     
+    # from tensorflow.keras.utils import plot_model
+    # model = ResCNN_4_STFT_DOA(num_classes=8, num_time_clips=30, num_res_block=2, num_filter=64)
+    # model.build(input_shape=(None, 30, 508, 8))
+    # model.summary()
+    # model.predict(np.random.random((1, 30, 508, 8)))
+    # lr_schedule = tf.keras.experimental.CosineDecay(initial_learning_rate=0.001,  # alpha=1e-7,
+    #                                                 decay_steps=220 * 50)
+    # optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
+    # model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['acc', ])
+    #
+    # weight_path = '../../model/0/ckpt'
+    # model.load_weights(filepath=weight_path)
+    #
+    # tf.keras.models.save_model(model, weight_path, )
     d3qn_model = D3QNNetwork()
     print('Hello World!')
