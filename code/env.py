@@ -55,7 +55,7 @@ class MAP_ENV(object):
         :return:
         '''
         src_2_wk_doa = self.map.find_relative_direction(src_id=src_id, wk_id=wk_id)
-        rela_doa = (src_2_wk_doa - abs_doa + 8) % 8
+        rela_doa = (src_2_wk_doa - abs_doa - 2 + 16) % 8
         return rela_doa
     
     def load_preprocess_state(self, state_path):
@@ -87,8 +87,9 @@ class MAP_ENV(object):
         
         state_path_ls = None
         for i in range(2):
-            doa_ls = {(rela_doa + i + self.num_actions) % self.num_actions,
-                      (rela_doa - i + self.num_actions) % self.num_actions, }
+            doa_ls = list({(rela_doa + i + self.num_actions) % self.num_actions,
+                           (rela_doa - i + self.num_actions) % self.num_actions, })
+            random.shuffle(doa_ls)
             for j in doa_ls:
                 str_doa = str(j * 45)
                 doa_data_path = os.path.join(self.ds_path, sub_src_basename, wk_basename, str_doa, )
@@ -123,8 +124,9 @@ class MAP_ENV(object):
         for i in range(2):
             doa_ls = list({(abs_action + i + self.num_actions) % self.num_actions,
                            (abs_action - i + self.num_actions) % self.num_actions, })
-            id_ls = self.map.nodes[self.wk_id].get_neighbor()[doa_ls]
-            doa_node_pair = [(doa, node) for doa, node in enumerate(id_ls) if ((doa in doa_ls) and (node is not None))]
+            neighbors = self.map.nodes[self.wk_id].get_neighbor()
+            doa_node_pair = [(doa, node) for doa, node in enumerate(neighbors) if
+                             ((doa in doa_ls) and (node is not None))]
             # id_ls = np.asarray(id_ls)
             # id_ls = id_ls[id_ls != None]
             if len(doa_node_pair) > 0:
@@ -134,7 +136,7 @@ class MAP_ENV(object):
         if next_id is None:
             return False
         else:
-            self.wk_id, self.abs_doa = next_id, next_abs_doa
+            self.wk_id, self.abs_doa = next_id, (next_abs_doa - 2 + 8) % 8
             return True
     
     def get_abs_action(self, action, ):
@@ -143,7 +145,7 @@ class MAP_ENV(object):
         :param action:
         :return:
         '''
-        return (action + self.abs_doa) % self.num_actions
+        return (action + self.abs_doa + 2) % self.num_actions
     
     def step(self, action, ):
         '''

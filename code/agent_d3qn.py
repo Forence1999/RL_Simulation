@@ -20,10 +20,15 @@ import pylab
 
 
 class DQNAgent(object):
-    def __init__(self, num_action=8, batch_size=8, memory_size=64, ddqn=True, softUpdate=True, lr=0.001,
-                 dueling=True, eps_decay=True, usePER=False, d3qn_model_dir='../model/d3qn_model',
-                 load_d3qn_model=True, d3qn_model_name=None, base_model_dir='../model/base_model', ):
+    def __init__(self, num_action=8, reward_discount_rate=0.95, lr=0.001,
+                 ddqn=True, dueling=True, softUpdate=True, softUpdate_tau=0.1,
+                 usePER=False, batch_size=8, memory_size=64,
+                 eps_decay=True, ini_eps=1.0, min_eps=0.01, eps_decay_rate=0.999,
+                 base_model_dir='../model/base_model', d3qn_model_dir='../model/d3qn_model',
+                 load_d3qn_model=True, d3qn_model_name=None, ):
         assert usePER == False, 'PER has not been checked'
+        self.name = self.__gen_name__() if (d3qn_model_name is None) else d3qn_model_name
+        
         # space
         self.num_action = num_action
         
@@ -33,15 +38,14 @@ class DQNAgent(object):
         self.dueling = dueling  # use dealing netowrk
         self.eps_decay = eps_decay  # use epsilon greedy strategy
         self.usePER = usePER  # use priority experienced replay
-        self.TAU = 0.1  # target network soft update hyperparameter
-        self.gamma = 0.95  # discount rate
-        self.lr = lr
+        self.tau = softUpdate_tau  # target network soft update hyperparameter
+        self.gamma = reward_discount_rate  # discount rate
+        self.lr = lr  # learning rate
         
         # exploration hyperparameters for epsilon and epsilon greedy strategy
-        self.eps = 1.0  # exploration probability at start
-        self.eps_min = 0.01  # minimum exploration probability
-        self.eps_decay_rate = 0.999  # exponential decay rate for exploration prob
-        self.name = self.__gen_name__() if (d3qn_model_name is None) else d3qn_model_name
+        self.ini_eps = ini_eps  # exploration probability at start
+        self.min_eps = min_eps  # minimum exploration probability
+        self.eps_decay_rate = eps_decay_rate  # exponential decay rate for exploration prob
         
         # Instantiate memory
         self.batch_size = batch_size
@@ -116,7 +120,7 @@ class DQNAgent(object):
             model_theta = self.model.get_weights()
             target_model_theta = self.target_model.get_weights()
             for idx, (weight, target_weight) in enumerate(zip(model_theta, target_model_theta)):
-                target_weight = target_weight * (1 - self.TAU) + weight * self.TAU
+                target_weight = target_weight * (1 - self.tau) + weight * self.tau
                 target_model_theta[idx] = target_weight
             self.target_model.set_weights(target_model_theta)
     
@@ -159,10 +163,14 @@ class DQNAgent(object):
         # action = np.asarray(action, dtype=np.int32)
         # reward = np.asarray(reward, dtype=np.float64)
         # done = np.asarray(done, dtype=np.bool)
-        state, action, reward, state_, done = list(zip(*minibatch))
-        # for i_state, i_action, i_reward, i_state_, i_done in range(len(minibatch)):
-        #     state.append(i_state), action.append(i_action), reward.append(i_reward), done.append(i_done)
-        #     state_.append(i_state_ if (i_state_ is not None) else i_state)
+        # state, action, reward, state_, done = list(zip(*minibatch))
+        # for i, i_state_ in enumerate(state_):
+        #     if i_state_ is None:
+        #         state_[i] = state[i]
+        state, action, reward, state_, done = [], [], [], [], []
+        for i_state, i_action, i_reward, i_state_, i_done in minibatch:
+            state.append(i_state), action.append(i_action), reward.append(i_reward), done.append(i_done)
+            state_.append(i_state_ if (i_state_ is not None) else i_state)
         target_old, target = self.learn_per_batch(state, action, reward, state_, done)
         
         if self.usePER:
@@ -188,8 +196,10 @@ class DQNAgent(object):
         
         target = self.model.predict(state)  # predict Q for starting state with the main network
         target_old = np.array(target)
-        target_next = self.model.predict(state_)  # predict best action in ending state with the main network
-        
+        try:
+            target_next = self.model.predict(state_)  # predict best action in ending state with the main network
+        except:
+            pass
         for i in range(len(done)):
             # correction on the Q value for the action used
             if done[i]:
@@ -219,9 +229,9 @@ class DQNAgent(object):
         '''
         # EPSILON GREEDY STRATEGY
         if self.eps_decay:  # Improved version of epsilon greedy strategy for Q-learning
-            explore_prob = self.eps_min + (self.eps - self.eps_min) * self.eps_decay_rate ** decay_step
+            explore_prob = self.min_eps + (self.ini_eps - self.min_eps) * self.eps_decay_rate ** decay_step
         else:
-            explore_prob = self.eps
+            explore_prob = self.min_eps
         
         if explore_prob > random.random():  # Make a random action (exploration)
             return random.randrange(self.num_action), explore_prob
@@ -237,6 +247,8 @@ class DQNAgent(object):
 
 
 if __name__ == '__main__':
+    print('Hello World!')
     
     agent = DQNAgent()
-    print('Hello World!')
+    
+    print('Brand-new World!')
