@@ -16,45 +16,75 @@ from lib import utils
 
 
 class RL_game():
-    def __init__(self, ):
+    def __init__(self, agent_learn=True, reward_discount_rate=0.95, lr=0.00001, dueling=True, softUpdate_tau=0.1,
+                 batch_size=64, learnTimes=1, episodes=500, eps_decay=False, min_eps=0.1,
+                 base_model_dir='../model/base_model', load_d3qn_model=False, based_on_base_model=True,
+                 num_update_episode=10, **kwargs):
         super(RL_game, self).__init__()
+        self.AGENT_CLASS = 'D3QN'
+        # self.agent_learn = True
+        self.agent_learn = agent_learn
+        self.print_interval = 10
+        self.max_episode_steps = 30  # 一个episode最多探索多少步，超过则强行终止。
+        # self.num_update_episode = 10  # update target model and reward graph & data
+        self.num_update_episode = num_update_episode  # update target model and reward graph & data
+        self.num_smooth_reward = 20
+        
         # -------------------------------- D3QN agent parameters ------------------------------------#
         self.num_action = 8
-        self.reward_discount_rate = 0.95
-        self.lr = 0.00001
+        # self.reward_discount_rate = 0.95  # [0.8, 0.95]
+        self.reward_discount_rate = reward_discount_rate  # [0.8, 0.95]
+        # self.lr = 0.00001  # [1e-5, 3e-4]
+        self.lr = lr  # [1e-5, 3e-4]
         self.ddqn = True
-        self.dueling = True
+        # self.dueling = True
+        self.dueling = dueling
         self.softUpdate = True
-        self.softUpdate_tau = 0.1
+        # self.softUpdate_tau = 0.1
+        self.softUpdate_tau = softUpdate_tau
+        # self.learnTimes = 1
+        self.learnTimes = learnTimes
         self.usePER = False
-        self.batch_size = 64
+        # self.batch_size = 64
+        self.batch_size = batch_size
         self.memory_size = 1024
-        self.episodes = 50
-        self.eps_decay = True
+        # self.memory_size = memory_size
+        # self.episodes = 500
+        self.episodes = episodes
+        # self.eps_decay = False
+        self.eps_decay = eps_decay
         self.ini_eps = 1.0
-        self.min_eps = 0.01
+        # self.min_eps = 0.1
+        self.min_eps = min_eps
         self.eps_decay_rate = 0.999
-        self.base_model_dir = '../model/base_model'
+        # self.base_model_dir = '../model/base_model'
+        self.base_model_dir = base_model_dir
         self.d3qn_model_dir = '../model/d3qn_model'
-        self.load_d3qn_model = False
+        # self.load_d3qn_model = False
+        self.load_d3qn_model = load_d3qn_model
+        # self.based_on_base_model = True
+        self.based_on_base_model = based_on_base_model
         self.model_name = self.__gen_name__()
         print('-' * 20, 'Model Name:', self.model_name, '-' * 20, )
+        
         self.agent = DQNAgent(num_action=self.num_action, reward_discount_rate=self.reward_discount_rate, lr=self.lr,
                               ddqn=self.ddqn, dueling=self.dueling, softUpdate=self.softUpdate,
-                              softUpdate_tau=self.softUpdate_tau,
+                              softUpdate_tau=self.softUpdate_tau, learnTimes=self.learnTimes,
                               usePER=self.usePER, batch_size=self.batch_size, memory_size=self.memory_size,
                               eps_decay=self.eps_decay, ini_eps=self.ini_eps, min_eps=self.min_eps,
                               eps_decay_rate=self.eps_decay_rate,
                               base_model_dir=self.base_model_dir, d3qn_model_dir=self.d3qn_model_dir,
-                              load_d3qn_model=self.load_d3qn_model, d3qn_model_name=self.model_name, )
-        self.agent.compile()
+                              load_d3qn_model=self.load_d3qn_model, based_on_base_model=self.based_on_base_model,
+                              d3qn_model_name=self.model_name, )
         # ---------------------------------------------------------------------------------------#
-        self.print_interval = 10
-        self.max_episode_steps = 50  # 一个episode最多探索多少步，超过则强行终止。
-        self.num_update_eposide = 10
-        self.num_smooth_reward = 20
-        self.ds_path = '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
+        
+        # -------------------------------- Environment parameters ------------------------------------#
+        self.ds_path = os.path.abspath(
+            '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5')
         self.env = MAP_ENV(ds_path=self.ds_path)
+        # ---------------------------------------------------------------------------------------#
+        
+        self.save_config()
     
     def __gen_name__(self, ):
         dueling = 'Dueling' if self.dueling else ''
@@ -63,16 +93,26 @@ class RL_game():
         eps_decay = 'epsDecay' if self.eps_decay else ''
         usePER = 'usePER' if self.usePER else ''
         lr = 'lr_' + str(self.lr)  # TODO
-        time_stamp = time.strftime("%Y%m%d-%H:%M:%S")
+        time_stamp = time.strftime("%Y%m%d-%H%M%S")
         
         name = '_'.join((dueling, dqn, softUpdate, eps_decay, usePER, lr, time_stamp)).replace('__', '_')
         print('-' * 20, 'Model Name:', name, '-' * 20, )
         
         return name
     
+    def save_config(self, ):
+        config_path = os.path.join(self.d3qn_model_dir, 'classifier', self.model_name, 'config.json')
+        config = {}
+        for key in list(self.__dict__.keys()):
+            if isinstance(self.__dict__[key], (str, int, float, bool)):
+                config[key] = self.__dict__[key]
+        
+        utils.json_writer(data=config, path=config_path)
+    
     def plot_and_save_rewards(self, reward, ):
-        img_path = '../model/reward_res/curve' + self.model_name + '.jpg'  # TODO: 修改数据和图像保存目录
-        title = 'Episode-wise training reward - ' + self.model_name
+        # img_path = '../model/reward_res/curve/' + self.model_name + '.jpg'
+        img_path = os.path.join(self.d3qn_model_dir, 'classifier', self.model_name, 'curve.jpg')
+        title = 'Training reward - ' + self.model_name
         reward = np.array(reward)
         ave_reward = np.convolve(np.ones((self.num_smooth_reward,)) / self.num_smooth_reward,
                                  reward, mode='valid')  # 20步移动平均
@@ -81,7 +121,12 @@ class RL_game():
         color = ['r', 'g']
         utils.plot_curve(data=list(zip(curve_name, curve_data, color)), title=title, img_path=img_path, linewidth=0.5,
                          show=False)
-        np.savez('../model/reward_res/data' + self.model_name + '.npz', data=reward)
+        # os.makedirs('../model/reward_res/data/', exist_ok=True)
+        # np.savez('../model/reward_res/data/' + self.model_name + '.npz', data=reward)
+        
+        data_path = os.path.join(self.d3qn_model_dir, 'classifier', self.model_name, 'reward.npz')
+        os.makedirs(os.path.dirname(data_path), exist_ok=True)
+        np.savez(data_path, data=reward)
     
     def play(self, ):
         total_step = 0
@@ -91,6 +136,7 @@ class RL_game():
             experience_ls = []
             state, done = self.env.reset()
             num_step = 0
+            exp_pro = None
             while not done:
                 num_step += 1
                 total_step += 1
@@ -107,15 +153,20 @@ class RL_game():
                 if num_step >= self.max_episode_steps:
                     break
             episode_reward.append(np.sum(e_reward))
-            self.agent.remember_batch(batch_experience=experience_ls, useDiscount=True)
-            self.agent.replay()
+            if self.agent_learn:
+                self.agent.remember_batch(batch_experience=experience_ls, useDiscount=True)
+                self.agent.learn()
             
-            print('episode: ', episode_idx, '\t', 'done:', done, '\t', 'steps:', num_step, '\t',
-                  'crt_reward: ', np.around(episode_reward[-1], 3), '\t',
-                  'avg_reward_20: ', np.around(
-                    np.mean(episode_reward[-self.num_smooth_reward if episode_idx >= self.num_smooth_reward else 0:]),
-                    2), )
-            if (episode_idx + 1) % self.num_update_eposide == 0:
+            print('episode:', episode_idx, '\t',
+                  'done:', done, '\t',
+                  'steps:', num_step, '\t',
+                  'crt_reward:', np.around(episode_reward[-1], 3), '\t',
+                  f'avg_reward_{self.num_smooth_reward}:',
+                  np.around(
+                      np.mean(episode_reward[-self.num_smooth_reward if episode_idx >= self.num_smooth_reward else 0:]),
+                      2), '\t',
+                  'exp_pro:', exp_pro)
+            if (episode_idx + 1) % self.num_update_episode == 0:
                 self.agent.update_target_model()
                 self.plot_and_save_rewards(episode_reward)
         self.plot_and_save_rewards(episode_reward)
@@ -130,8 +181,44 @@ if __name__ == '__main__':
     # tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024 * 6)
     # tf.config.experimental.set_memory_growth(gpus[0], True)
     # K.set_image_data_format('channels_first')
+    import ast
+    import argparse
     
-    game = RL_game()
+    parser = argparse.ArgumentParser(description='parameters for D3QN agent.')
+    # parser.add_argument('--agent_learn', type=ast.literal_eval, default=True, help='')
+    # parser.add_argument('--reward_discount_rate', type=float, default=0.9, help='')
+    # parser.add_argument('--lr', type=float, default=0.00001, help='')
+    # parser.add_argument('--dueling', type=ast.literal_eval, default=True, help='')
+    # parser.add_argument('--softUpdate_tau', type=float, default=0.1, help='')
+    # parser.add_argument('--batch_size', type=int, default=64, help='')
+    # parser.add_argument('--memory_size', type=int, default=1024, help='')
+    # parser.add_argument('--episodes', type=int, default=500, help='')
+    # parser.add_argument('--eps_decay', type=ast.literal_eval, default=False, help='')
+    # parser.add_argument('--min_eps', type=float, default=0.1, help='')
+    # parser.add_argument('--base_model_dir', type=str, default='../model/base_model', help='')
+    # parser.add_argument('--load_d3qn_model', type=ast.literal_eval, default=False, help='')
+    # parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=False, help='')
+    # parser.add_argument('--num_update_episode', type=int, default=10, help='')
+    parser.add_argument('--agent_learn', type=ast.literal_eval, default=True, help='')
+    parser.add_argument('--reward_discount_rate', type=float, default=0.9, help='')
+    parser.add_argument('--lr', type=float, default=0.0001, help='')
+    parser.add_argument('--dueling', type=ast.literal_eval, default=True, help='')
+    parser.add_argument('--batch_size', type=int, default=1024, help='')
+    parser.add_argument('--learnTimes', type=int, default=16, help='')
+    # parser.add_argument('--memory_size', type=int, default=1024, help='')
+    parser.add_argument('--episodes', type=int, default=1500, help='')
+    parser.add_argument('--eps_decay', type=ast.literal_eval, default=False, help='')
+    parser.add_argument('--min_eps', type=float, default=0.1, help='')
+    parser.add_argument('--base_model_dir', type=str, default='../model/base_model', help='')
+    parser.add_argument('--load_d3qn_model', type=ast.literal_eval, default=False, help='')
+    parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=False, help='')
+    parser.add_argument('--num_update_episode', type=int, default=1, help='')
+    parser.add_argument('--softUpdate_tau', type=float, default=0.01, help='')
+    
+    args = vars(parser.parse_args())
+    print('RL config:', args)
+    
+    game = RL_game(**args)
     game.play()
     
     print('Brand-new World!')

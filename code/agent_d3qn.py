@@ -8,26 +8,32 @@
 # @Software: PyCharm
 
 import os
+import sys
 import time
 import random
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 from model_tf.PER import Memory
-from model_tf.d3qn import D3QNNetwork
+from agent_models import D3QN_Classifier, FeatureExtractor
 from collections import deque
-import pylab
 
 
 class DQNAgent(object):
     def __init__(self, num_action=8, reward_discount_rate=0.95, lr=0.001,
-                 ddqn=True, dueling=True, softUpdate=True, softUpdate_tau=0.1,
+                 ddqn=True, dueling=True, softUpdate=True, softUpdate_tau=0.1, learnTimes=1,
                  usePER=False, batch_size=8, memory_size=64,
-                 eps_decay=True, ini_eps=1.0, min_eps=0.01, eps_decay_rate=0.999,
+                 eps_decay=False, ini_eps=1.0, min_eps=0.01, eps_decay_rate=0.999,
                  base_model_dir='../model/base_model', d3qn_model_dir='../model/d3qn_model',
-                 load_d3qn_model=True, d3qn_model_name=None, ):
+                 load_d3qn_model=True, based_on_base_model=True, d3qn_model_name=None, **kwargs):
+        super(DQNAgent, self).__init__(**kwargs)
         assert usePER == False, 'PER has not been checked'
-        self.name = self.__gen_name__() if (d3qn_model_name is None) else d3qn_model_name
+        if d3qn_model_name is None:
+            self.name = self.__class__.__name__
+            print('Warning:',
+                  'A DQNAgent class is initialized with default name (\'DQNAgent\'). And it may load unexpected models.')
+        else:
+            self.name = d3qn_model_name
         
         # space
         self.num_action = num_action
@@ -35,11 +41,12 @@ class DQNAgent(object):
         # defining model parameters
         self.ddqn = ddqn  # use double deep q network
         self.softUpdate = softUpdate  # use soft parameter update
-        self.dueling = dueling  # use dealing netowrk
-        self.eps_decay = eps_decay  # use epsilon greedy strategy
+        self.dueling = dueling  # use dealing network
+        self.eps_decay = eps_decay  # use epsilon greedy strategy if False, min_eps will be used.
         self.usePER = usePER  # use priority experienced replay
         self.tau = softUpdate_tau  # target network soft update hyperparameter
-        self.gamma = reward_discount_rate  # discount rate
+        self.learnTimes = learnTimes  # how many times to update the model when self.learn() is called
+        self.discount_rate = reward_discount_rate  # discount rate
         self.lr = lr  # learning rate
         
         # exploration hyperparameters for epsilon and epsilon greedy strategy
@@ -56,35 +63,25 @@ class DQNAgent(object):
             self.memory = deque(maxlen=memory_size)
         
         self.load_d3qn_model = load_d3qn_model
+        self.based_on_base_model = based_on_base_model
         self.base_model_dir = base_model_dir
-        self.d3qn_model_dir = os.path.join(d3qn_model_dir, self.name)
+        self.d3qn_model_dir = os.path.join(d3qn_model_dir, 'classifier', self.name)
         os.makedirs(self.d3qn_model_dir, exist_ok=True)
         
         # create main model and target model
-        self.model = D3QNNetwork(num_action=self.num_action, load_d3qn_model=self.load_d3qn_model, dueling=self.dueling,
-                                 base_model_dir=self.base_model_dir, d3qn_model_dir=self.d3qn_model_dir, )
+        self.feature_extractor = FeatureExtractor(model_dir=self.base_model_dir, )
+        self.model = D3QN_Classifier(dueling=self.dueling, base_model_dir=self.base_model_dir,
+                                     load_d3qn_model=self.load_d3qn_model,
+                                     based_on_base_model=self.based_on_base_model,
+                                     d3qn_model_dir=self.d3qn_model_dir, )
         if self.ddqn:
-            self.target_model = D3QNNetwork(num_action=self.num_action, load_d3qn_model=self.load_d3qn_model,
-                                            dueling=self.dueling,
-                                            base_model_dir=self.base_model_dir, d3qn_model_dir=self.d3qn_model_dir, )
-    
-    def __gen_name__(self, ):
-        '''
-        generate a RL model model name for saving.
-        :return:
-        '''
-        dueling = 'Dueling' if self.dueling else ''
-        dqn = 'DDQN' if self.ddqn else 'DQN'
-        softUpdate = 'softUpdate' if self.softUpdate else ''
-        eps_decay = 'epsDecay' if self.eps_decay else ''
-        usePER = 'usePER' if self.usePER else ''
-        lr = 'lr_' + str(self.lr)  # TODO
-        time_stamp = time.strftime("%Y%m%d-%H:%M:%S")
+            self.target_model = D3QN_Classifier(dueling=self.dueling, base_model_dir=self.base_model_dir,
+                                                load_d3qn_model=self.load_d3qn_model,
+                                                based_on_base_model=self.based_on_base_model,
+                                                d3qn_model_dir=self.d3qn_model_dir, )
+            self.update_target_model(tau=1.0)
         
-        name = '_'.join((dueling, dqn, softUpdate, eps_decay, usePER, lr, time_stamp)).replace('__', '_')
-        print('-' * 20, 'Model Name:', name, '-' * 20, )
-        
-        return name
+        self.compile(**kwargs)
     
     def save_model(self, model_path=None, ):
         '''
@@ -92,11 +89,11 @@ class DQNAgent(object):
         :param model_path:
         :return:
         '''
-        model_path = self.d3qn_model_dir if (model_path is None) else model_path
+        model_path = self.d3qn_model_dir if (model_path is None) else os.path.join(model_path, 'classifier')
         if self.ddqn:
-            self.target_model.save_model(model_path)
+            self.target_model.save(model_path)
         else:
-            self.model.save_model(model_path)
+            self.model.save(model_path)
     
     def compile(self, **kwargs):
         '''
@@ -107,20 +104,22 @@ class DQNAgent(object):
         # lr_schedule = tf.keras.experimental.CosineDecay(initial_learning_rate=lr, decay_steps=1e4)
         # lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(0.01, decay_steps=decay_steps, decay_rate=0.99, staircase=True)
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr)
-        self.model.compile(optimizer=self.optimizer, loss="mean_squared_error", metrics=["accuracy"], **kwargs)
+        self.model.compile(optimizer=self.optimizer, loss="mean_squared_error", metrics=['accuracy'], **kwargs)
     
-    def update_target_model(self, ):
+    def update_target_model(self, tau=None):
         '''
         bases on softUpdate, update target_model
+        :param tau: the weight of model (not target_model)
         :return:
         '''
+        tau = self.tau if tau is None else tau
         if self.ddqn and (not self.softUpdate):
             self.target_model.set_weights(self.model.get_weights())
         elif self.ddqn and self.softUpdate:
             model_theta = self.model.get_weights()
             target_model_theta = self.target_model.get_weights()
             for idx, (weight, target_weight) in enumerate(zip(model_theta, target_model_theta)):
-                target_weight = target_weight * (1 - self.tau) + weight * self.tau
+                target_weight = target_weight * (1 - tau) + weight * tau
                 target_model_theta[idx] = target_weight
             self.target_model.set_weights(target_model_theta)
     
@@ -128,11 +127,16 @@ class DQNAgent(object):
         '''
         save the experience to memory buffer.
         '''
+        
+        # extract feature to remember
+        state = self.feature_extractor.predict(np.array([state]))[0]
+        if state_ is not None:
+            state_ = self.feature_extractor.predict(np.array([state_]))[0]
         experience = state, action, reward, state_, done
         if self.usePER:
             self.MEMORY.append(experience)
         else:
-            self.memory.append((experience))
+            self.memory.append(experience)
     
     def remember_batch(self, batch_experience, useDiscount=True):
         '''
@@ -141,12 +145,49 @@ class DQNAgent(object):
         '''
         if useDiscount:
             for i in range(len(batch_experience) - 2, -1, -1):
-                batch_experience[i][2] += self.gamma * batch_experience[i + 1][2]
+                batch_experience[i][2] += self.discount_rate * batch_experience[i + 1][2]
         for experience in batch_experience:
-            if self.usePER:
-                self.MEMORY.append(experience)
+            self.remember(*experience)
+    
+    def learn_sample(self, state, action, reward, state_, done, ):
+        self.learn_per_batch([state], [action], [reward], [state_], [done], )
+    
+    def learn_per_batch(self, state, action, reward, state_, done, ):
+        '''
+        optimize the model for one batch
+        :param state:
+        :param action:
+        :param reward:
+        :param state_:
+        :param done:
+        :return:
+        '''
+        state = np.array(state)
+        action = np.array(action, dtype=np.int32)
+        reward = np.array(reward, dtype=np.float32)
+        state_ = np.array(state_)
+        done = np.array(done, dtype=np.bool)
+        
+        target = self.model.predict(state)  # predict Q for starting state with the main network
+        target_old = np.array(target)
+        target_next = self.model.predict(state_)  # predict best action in ending state with the main network
+        if self.ddqn:
+            target_value = self.target_model.predict(state_)  # predict Q for ending state with the target network
+        
+        for i in range(len(done)):
+            # correction on the Q value for the action used
+            if done[i]:
+                target[i][action[i]] = reward[i]
             else:
-                self.memory.append((experience))
+                if self.ddqn:  # Double - DQN
+                    a = np.argmax(target_next[i])  # current Q Network selects the action
+                    target[i][action[i]] = reward[i] + self.discount_rate * (target_value[i][a])  # target Q Network to evaluate
+                else:  # Standard - DQN ---- DQN chooses the max Q value among next actions
+                    target[i][action[i]] = reward[i] + self.discount_rate * (np.amax(target_next[i]))
+        
+        self.model.fit(state, target, batch_size=min(len(done), self.batch_size), verbose=2)
+        
+        return target_old, target
     
     def replay(self, ):
         '''
@@ -171,6 +212,7 @@ class DQNAgent(object):
         for i_state, i_action, i_reward, i_state_, i_done in minibatch:
             state.append(i_state), action.append(i_action), reward.append(i_reward), done.append(i_done)
             state_.append(i_state_ if (i_state_ is not None) else i_state)
+        
         target_old, target = self.learn_per_batch(state, action, reward, state_, done)
         
         if self.usePER:
@@ -179,46 +221,10 @@ class DQNAgent(object):
             # Update priority
             self.MEMORY.batch_update(tree_idx, absolute_errors)
     
-    def learn_per_batch(self, state, action, reward, state_, done, ):
-        '''
-        optimizer the model for one batch
-        :param state:
-        :param action:
-        :param reward:
-        :param state_:
-        :param done:
-        :return:
-        '''
-        state, state_ = np.asarray(state), np.asarray(state_)
-        action = np.asarray(action, dtype=np.int32)
-        reward = np.asarray(reward, dtype=np.float32)
-        done = np.asarray(done, dtype=np.bool)
-        
-        target = self.model.predict(state)  # predict Q for starting state with the main network
-        target_old = np.array(target)
-        try:
-            target_next = self.model.predict(state_)  # predict best action in ending state with the main network
-        except:
-            pass
-        for i in range(len(done)):
-            # correction on the Q value for the action used
-            if done[i]:
-                target[i][action[i]] = reward[i]
-            else:
-                if self.ddqn:  # Double - DQN
-                    target_value = self.target_model.predict(state_)
-                    # predict Q for ending state with the target network
-                    a = np.argmax(target_next[i])  # current Q Network selects the action
-                    target[i][action[i]] = reward[i] + self.gamma * (target_value[i][a])  # target Q Network to evaluate
-                else:  # Standard - DQN ---- DQN chooses the max Q value among next actions
-                    target[i][action[i]] = reward[i] + self.gamma * (np.amax(target_next[i]))
-        
-        self.model.fit(state, target, batch_size=self.batch_size, verbose=2)  # Train the Neural Network with batches
-        
-        return target_old, target
-    
-    def learn(self, state, action, reward, state_, done, ):
-        self.learn_per_batch([state], [action], [reward], [state_], [done], )
+    def learn(self, learnTimes=None):
+        learnTimes = self.learnTimes if learnTimes is None else learnTimes
+        for _ in range(learnTimes):
+            self.replay()
     
     def act(self, state, decay_step, ):
         '''
@@ -227,6 +233,7 @@ class DQNAgent(object):
         :param decay_step:
         :return:
         '''
+        
         # EPSILON GREEDY STRATEGY
         if self.eps_decay:  # Improved version of epsilon greedy strategy for Q-learning
             explore_prob = self.min_eps + (self.ini_eps - self.min_eps) * self.eps_decay_rate ** decay_step
@@ -236,13 +243,17 @@ class DQNAgent(object):
         if explore_prob > random.random():  # Make a random action (exploration)
             return random.randrange(self.num_action), explore_prob
         else:  # Get action from Q-network (exploitation)
-            return np.argmax(self.predict(state)), explore_prob
+            y_pred = self.predict(state)
+            # print('y_pred:', y_pred)
+            return np.argmax(y_pred), explore_prob
     
     def predict(self, state, ):
         '''
         produce the output of the given state with model.
         '''
         state = np.array([state])
+        state = self.feature_extractor.predict(state)
+        
         return self.model.predict(state)
 
 

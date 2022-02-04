@@ -1,11 +1,19 @@
 import os
 import re
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from PIL import Image
 import random
 from collections import Counter
+
+
+def json_writer(data, path):
+    data = json.dumps(data)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as writer:
+        writer.write(data)
 
 
 def next_greater_power_of_2(x):

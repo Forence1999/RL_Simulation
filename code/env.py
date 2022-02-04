@@ -64,8 +64,19 @@ class MAP_ENV(object):
         :param state:
         :return:
         '''
-        state = np.load(state_path)['data'][:, :, 5:].transpose((1, 2, 0))
-        return state
+        x = np.load(state_path)['data'][:, :, 5:].transpose((1, 2, 0))
+        # x = x.transpose((1, 0, 2))
+        
+        # log
+        x_sign = np.sign(x)
+        x_abs = np.abs(x)
+        x_log = np.log(x_abs + 1)
+        x = x_sign * x_log
+        # norm
+        # x = (x - np.mean(x)) / np.std(x)
+        # x = x / np.std(x)
+        
+        return x
     
     def get_state(self, src_id, wk_id, abs_doa, ):
         '''
@@ -156,7 +167,7 @@ class MAP_ENV(object):
         doAction = self.next_pose(action=action)
         
         # setting rewards
-        reward = -0.1
+        reward = -0.05
         if not doAction:
             reward -= 0.1
         
