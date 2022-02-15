@@ -19,7 +19,7 @@
       <paths name="swang@net-g14">
         <serverdata>
           <mappings>
-            <mapping deploy="/SmartWalker/RL_Simulation_D3QN" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/SmartWalker/RL_Simulation" local="$PROJECT_DIR$" web="/" />
           </mappings>
           <excludedPaths>
             <excludedPath path="/SmartWalker/RL_Simulation_D3QN/dataset" />

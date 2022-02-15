@@ -65,7 +65,7 @@ class DQNAgent(object):
         self.load_d3qn_model = load_d3qn_model
         self.based_on_base_model = based_on_base_model
         self.base_model_dir = base_model_dir
-        self.d3qn_model_dir = os.path.join(d3qn_model_dir, 'classifier', self.name)
+        self.d3qn_model_dir = os.path.join(d3qn_model_dir, self.name, )
         os.makedirs(self.d3qn_model_dir, exist_ok=True)
         
         # create main model and target model
@@ -73,27 +73,32 @@ class DQNAgent(object):
         self.model = D3QN_Classifier(dueling=self.dueling, base_model_dir=self.base_model_dir,
                                      load_d3qn_model=self.load_d3qn_model,
                                      based_on_base_model=self.based_on_base_model,
-                                     d3qn_model_dir=self.d3qn_model_dir, )
+                                     d3qn_model_dir=self.d3qn_model_dir, loadTarget=False)
         if self.ddqn:
             self.target_model = D3QN_Classifier(dueling=self.dueling, base_model_dir=self.base_model_dir,
                                                 load_d3qn_model=self.load_d3qn_model,
                                                 based_on_base_model=self.based_on_base_model,
-                                                d3qn_model_dir=self.d3qn_model_dir, )
-            self.update_target_model(tau=1.0)
+                                                d3qn_model_dir=self.d3qn_model_dir, loadTarget=True)
+            # self.update_target_model(tau=1.0)
         
         self.compile(**kwargs)
     
-    def save_model(self, model_path=None, ):
+    def save_model(self, model_dir=None, ):
         '''
         save the RL model. If ddqn, save target_model, else save model.
-        :param model_path:
+        :param model_dir:
         :return:
         '''
-        model_path = self.d3qn_model_dir if (model_path is None) else os.path.join(model_path, 'classifier')
+        
+        model_dir = self.d3qn_model_dir if (model_dir is None) else model_dir
+        
+        fe_dir = os.path.join(model_dir, 'feature_extractor', 'ckpt')
+        tf.keras.models.save_model(model=self.feature_extractor, filepath=fe_dir, )
+        c_dir = os.path.join(model_dir, 'classifier', 'ckpt')
+        tf.keras.models.save_model(model=self.model, filepath=c_dir, )
         if self.ddqn:
-            self.target_model.save(model_path)
-        else:
-            self.model.save(model_path)
+            ct_dir = os.path.join(model_dir, 'classifier', 'target_ckpt')
+            tf.keras.models.save_model(model=self.target_model, filepath=ct_dir, )
     
     def compile(self, **kwargs):
         '''
@@ -119,7 +124,7 @@ class DQNAgent(object):
             model_theta = self.model.get_weights()
             target_model_theta = self.target_model.get_weights()
             for idx, (weight, target_weight) in enumerate(zip(model_theta, target_model_theta)):
-                target_weight = target_weight * (1 - tau) + weight * tau
+                target_weight = weight * tau + target_weight * (1 - tau)
                 target_model_theta[idx] = target_weight
             self.target_model.set_weights(target_model_theta)
     
@@ -181,11 +186,12 @@ class DQNAgent(object):
             else:
                 if self.ddqn:  # Double - DQN
                     a = np.argmax(target_next[i])  # current Q Network selects the action
-                    target[i][action[i]] = reward[i] + self.discount_rate * (target_value[i][a])  # target Q Network to evaluate
+                    target[i][action[i]] = reward[i] + self.discount_rate * (
+                        target_value[i][a])  # target Q Network to evaluate
                 else:  # Standard - DQN ---- DQN chooses the max Q value among next actions
                     target[i][action[i]] = reward[i] + self.discount_rate * (np.amax(target_next[i]))
         
-        self.model.fit(state, target, batch_size=min(len(done), self.batch_size), verbose=2)
+        self.model.fit(state, target, batch_size=min(len(done), self.batch_size), verbose=0)
         
         return target_old, target
     
@@ -244,8 +250,8 @@ class DQNAgent(object):
             return random.randrange(self.num_action), explore_prob
         else:  # Get action from Q-network (exploitation)
             y_pred = self.predict(state)
-            # print('y_pred:', y_pred)
-            return np.argmax(y_pred), explore_prob
+            print('y_pred:', y_pred[0])
+            return np.argmax(y_pred[0]), explore_prob
     
     def predict(self, state, ):
         '''

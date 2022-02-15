@@ -34,12 +34,12 @@ class SACAgent(object):
         Applications. arXiv preprint arXiv:1812.05905. 2018.
     """
     
-    def __init__(self, num_Q=2, num_action=8, reward_scale=1.0, reward_discount_rate=0.99,
-                 policy_lr=3e-4, Q_lr=3e-4, alpha_lr=3e-4,
+    def __init__(self, num_Q=2, num_action=8, reward_scale=1.0, reward_discount_rate=0.75,
+                 policy_lr=4e-4, Q_lr=4e-4, alpha_lr=4e-4,
                  usePER=False, batch_size=8, memory_size=64, learnTimes=1,
-                 softUpdate=True, softUpdate_tau=5e-3, target_update_interval=1,
+                 softUpdate=True, softUpdate_tau=5e-3,
                  base_model_dir='../model/base_model', sac_model_dir='../model/d3qn_model',
-                 load_sac_model=True, sac_model_name=None, based_on_base_model=True,
+                 load_sac_model=True, sac_model_name=None, based_on_base_model=False,
                  **kwargs):
         super(SACAgent, self).__init__(**kwargs)
         assert softUpdate == True, 'softUpdate must be True for SAC'
@@ -63,7 +63,6 @@ class SACAgent(object):
         self.policy_lr = policy_lr
         self.Q_lr = Q_lr
         self.alpha_lr = alpha_lr
-        self.target_update_interval = target_update_interval
         self.target_entropy = self.__heuristic_target_entropy__(self.num_action)
         # memory
         self.usePER = usePER
@@ -79,14 +78,13 @@ class SACAgent(object):
         os.makedirs(self.sac_model_dir, exist_ok=True)
         
         self.feature_extractor = FeatureExtractor(model_dir=self.base_model_dir, )
-        self.policy = SAC_actor(base_model_dir=base_model_dir,
-                                load_sac_model=load_sac_model, sac_model_dir=sac_model_dir,
-                                based_on_base_model=based_on_base_model)
-        self.Qs = self.load_Q_model()
-        self.Q_targets = self.load_Q_model()
-        self.__update_target_model__(tau=tf.constant(1.0))
-        self.log_alpha = tf.Variable(0.0)
-        self.alpha = tfp.util.DeferredTensor(self.log_alpha, tf.exp)
+        self.policy = SAC_actor(base_model_dir=self.base_model_dir,
+                                load_sac_model=self.load_sac_model, sac_model_dir=self.sac_model_dir,
+                                based_on_base_model=self.based_on_base_model)
+        self.Qs = self.load_Q_model(loadTarget=False)
+        self.Q_targets = self.load_Q_model(loadTarget=True)
+        # self.update_target_model(tau=tf.constant(1.0))
+        self.log_alpha, self.alpha = self.load_alpha()
         
         # optimizer
         self.Q_optimizers = tuple(tf.optimizers.Adam(learning_rate=self.Q_lr, name=f'Q_{i}_optimizer')
@@ -94,71 +92,63 @@ class SACAgent(object):
         self.policy_optimizer = tf.optimizers.Adam(learning_rate=self.policy_lr, name="policy_optimizer")
         self.alpha_optimizer = tf.optimizers.Adam(learning_rate=self.alpha_lr, name='alpha_optimizer')
     
-    def load_Q_model(self, ):
+    def load_alpha(self, ):
+        if self.load_sac_model:
+            log_alpha = float(np.load(os.path.join(self.sac_model_dir, 'alpha.npz'))['log_alpha'])
+            log_alpha = tf.Variable(log_alpha)
+            alpha = tfp.util.DeferredTensor(log_alpha, tf.exp)
+        else:
+            log_alpha = tf.Variable(0.0)
+            alpha = tfp.util.DeferredTensor(log_alpha, tf.exp)
+        return log_alpha, alpha
+    
+    def load_Q_model(self, loadTarget=False):
         Qs = []
-        for _ in range(self.num_Q):
+        for i in range(self.num_Q):
             Q = SAC_critic(base_model_dir=self.base_model_dir,
                            load_sac_model=self.load_sac_model, sac_model_dir=self.sac_model_dir,
-                           based_on_base_model=self.based_on_base_model)
+                           based_on_base_model=self.based_on_base_model, index=i, loadTarget=loadTarget)
             Qs.append(Q)
         return Qs
     
     def __heuristic_target_entropy__(self, action_space_size):
         ''' return target_entropy for discrete action space '''
-        return -np.log(1.0 / action_space_size) * 0.98
+        return -np.log(1.0 / action_space_size) * 0.5
     
-    def actions_and_log_probs(self, state):
-        """Given the state, produces an action, the probability of the action, the log probability of the action, and
-        the argmax action"""
-        action_probabilities = self.policy(state)
-        max_probability_action = np.argmax(action_probabilities, dim=-1)
-        action_distribution = create_actor_distribution(action_probabilities, )
-        action = action_distribution.sample().cpu()
-        # Have to deal with situation of 0.0 probabilities because we can't do log 0
-        z = action_probabilities == 0.0
-        z = z.float() * 1e-8
-        log_action_probabilities = np.log(action_probabilities + z)
-        return action, (action_probabilities, log_action_probabilities), max_probability_action
-    
-    @tf.function(experimental_relax_shapes=True)
-    def compute_Q_targets(self, batch):
-        next_observations = batch['next_observations']
-        rewards = batch['rewards']
-        terminals = batch['terminals']
+    # @tf.function(experimental_relax_shapes=True)
+    def __compute_Q_targets__(self, rewards, next_states, dones):
         
-        entropy_scale = tf.convert_to_tensor(self.alpha)
+        alpha = tf.convert_to_tensor(self.alpha)
         reward_scale = tf.convert_to_tensor(self.reward_scale)
         discount = tf.convert_to_tensor(self.discount_rate)
         
-        next_actions, (next_pis, next_log_pis), _ = self.actions_and_log_probs(next_observations)
-        next_Qs_values = tuple(Q(next_observations, next_actions) for Q in self.Q_targets)
+        next_actions, (next_probs, next_log_probs), _ = self.actions_and_log_probs(next_states)
+        next_Qs_values = tuple(Q(next_states) for Q in self.Q_targets)
         next_Q_values = tf.reduce_min(next_Qs_values, axis=0)
-        next_Q_values = next_pis * (next_Q_values - entropy_scale * next_log_pis)
-        next_Q_values = next_Q_values.sum(dim=1, keepdims=True)
+        next_values = next_probs * (next_Q_values - alpha * next_log_probs)
+        next_values = tf.reduce_sum(next_values, axis=1, )
         
-        terminals = tf.cast(terminals, next_Q_values.dtype)
-        Q_targets = reward_scale * rewards + discount * (1.0 - terminals) * next_Q_values
+        dones = tf.cast(dones, next_values.dtype)
+        Q_targets = reward_scale * rewards + discount * (1.0 - dones) * next_values
         
         return tf.stop_gradient(Q_targets)
     
-    @tf.function(experimental_relax_shapes=True)
-    def __update_critic__(self, batch):
+    # @tf.function(experimental_relax_shapes=True)
+    def __update_critic__(self, states, actions, rewards, next_states, dones):
         '''
         Update the Q-function.
         See Equations (5, 6) in [1], for further information of the Q-function update rule.
         '''
         
-        Q_targets = self.compute_Q_targets(batch)
-        
-        observations = batch['observations']
-        actions = batch['actions']
-        rewards = batch['rewards']
-        
+        Q_targets = self.__compute_Q_targets__(rewards, next_states, dones)
+        Q_targets = tf.expand_dims(Q_targets, axis=1)
         Qs_values = []
         Qs_losses = []
         for Q, optimizer in zip(self.Qs, self.Q_optimizers):
             with tf.GradientTape() as tape:
-                Q_values = Q(observations, actions)
+                Q_values = Q(states)
+                Q_values = tf.gather_nd(Q_values, np.array((np.arange(len(actions)), actions)).T)
+                Q_values = tf.expand_dims(Q_values, axis=1)
                 Q_losses = 0.5 * (tf.losses.MSE(y_true=Q_targets, y_pred=Q_values))
                 Q_loss = tf.nn.compute_average_loss(Q_losses)
             
@@ -169,8 +159,8 @@ class SACAgent(object):
         
         return Qs_values, Qs_losses
     
-    @tf.function(experimental_relax_shapes=True)
-    def __update_actor__(self, batch):
+    # @tf.function(experimental_relax_shapes=True)
+    def __update_actor__(self, states):
         '''
         Update the policy.
 
@@ -178,17 +168,16 @@ class SACAgent(object):
         and Section 5 in [1] for further information of the entropy update.
         '''
         
-        observations = batch['observations']
-        entropy_scale = tf.convert_to_tensor(self.alpha)
+        alpha = tf.convert_to_tensor(self.alpha)
+        states = tf.convert_to_tensor(states)
         
         with tf.GradientTape() as tape:
-            actions, (pis, log_pis), _ = self.actions_and_log_probs(observations)
+            actions, (probs, log_probs), _ = self.actions_and_log_probs(states)
+            Qs_targets = tuple(Q(states) for Q in self.Qs)
+            Q_targets = tf.reduce_min(Qs_targets, axis=0)
             
-            Qs_log_targets = tuple(Q(observations, actions) for Q in self.Qs)
-            Q_log_targets = tf.reduce_mean(Qs_log_targets, axis=0)  # TODO: mean() or min()
-            
-            policy_losses = entropy_scale * log_pis - Q_log_targets
-            policy_losses = (pis * policy_losses).sum(dim=1)
+            policy_losses = alpha * log_probs - Q_targets
+            policy_losses = tf.reduce_sum(probs * policy_losses, axis=1)
             policy_loss = tf.nn.compute_average_loss(policy_losses)
         
         policy_gradients = tape.gradient(policy_loss, self.policy.trainable_variables)
@@ -196,14 +185,14 @@ class SACAgent(object):
         
         return policy_losses
     
-    @tf.function(experimental_relax_shapes=True)
-    def __update_alpha__(self, batch):
-        observations = batch['observations']
-        actions, (pis, log_pis), _ = self.actions_and_log_probs(observations)
+    # @tf.function(experimental_relax_shapes=True)
+    def __update_alpha__(self, states):
+        actions, (probs, log_probs), _ = self.actions_and_log_probs(states)
+        actions, probs, log_probs = tf.stop_gradient(actions), tf.stop_gradient(probs), tf.stop_gradient(log_probs)
         
         with tf.GradientTape() as tape:
-            alpha_losses = pis * (-self.alpha * tf.stop_gradient(log_pis + self.target_entropy))
-            alpha_losses = (pis * alpha_losses).sum(dim=1)
+            alpha_losses = -self.alpha * tf.stop_gradient(
+                tf.reduce_sum(probs * log_probs, axis=1) + self.target_entropy)  # TODO log_alpha?
             alpha_loss = tf.nn.compute_average_loss(alpha_losses)
             # NOTE(hartikainen): It's important that we take the average here, \
             # otherwise we end up effectively having `batch_size` times too large learning rate.
@@ -213,41 +202,40 @@ class SACAgent(object):
         
         return alpha_losses
     
-    @tf.function(experimental_relax_shapes=True)
-    def __update_target_model__(self, tau=None):
+    # @tf.function(experimental_relax_shapes=True)
+    def update_target_model(self, tau=None):
         if self.softUpdate:
             tau = self.tau if tau is None else tau
         else:
             tau = 1.0
         for Q, Q_target in zip(self.Qs, self.Q_targets):
-            for source_weight, target_weight in zip(Q.trainable_variables, Q_target.trainable_variables):
-                target_weight.assign(tau * source_weight + (1.0 - tau) * target_weight)
+            # for source_weight, target_weight in zip(Q.trainable_variables, Q_target.trainable_variables):
+            #     target_weight.assign(tau * source_weight + (1.0 - tau) * target_weight)
+            model_theta = Q.get_weights()
+            target_model_theta = Q_target.get_weights()
+            for idx, (weight, target_weight) in enumerate(zip(model_theta, target_model_theta)):
+                target_weight = weight * tau + target_weight * (1 - tau)
+                target_model_theta[idx] = target_weight
+            Q_target.set_weights(target_model_theta)
     
-    @tf.function(experimental_relax_shapes=True)
-    def update(self, batch):
-        """Runs the update operations for policy, Q, and alpha."""
-        Qs_values, Qs_losses = self.__update_critic__(batch)
-        policy_losses = self.__update_actor__(batch)
-        alpha_losses = self.__update_alpha__(batch)
-    
-    def _do_training(self, iteration, batch):
-        training_diagnostics = self.update(batch)
-        
-        if iteration % self.target_update_interval == 0:
-            # Run target ops here.
-            self.__update_target_model__(tau=tf.constant(self.tau))
-        
-        return training_diagnostics
-    
-    def save_model(self, model_path=None, ):
+    def save_model(self, model_dir=None, ):
         '''
         save the RL model. If ddqn, save target_model, else save model.
-        :param model_path:
+        :param model_dir:
         :return:
         '''
-        model_path = self.sac_model_dir if (model_path is None) else os.path.join(model_path, 'classifier')
-        # self.model.save(model_path)
-        # TODO: save model
+        model_dir = self.sac_model_dir if (model_dir is None) else model_dir
+        fe_dir = os.path.join(model_dir, 'feature_extractor', 'ckpt')
+        tf.keras.models.save_model(model=self.feature_extractor, filepath=fe_dir, )
+        p_dir = os.path.join(model_dir, 'actor', 'ckpt')
+        tf.keras.models.save_model(model=self.policy, filepath=p_dir, )
+        for i, (Q, Q_target) in enumerate(zip(self.Qs, self.Q_targets)):
+            c_dir = os.path.join(model_dir, 'critic', f'ckpt_{i}')
+            ct_dir = os.path.join(model_dir, 'critic', f'target_ckpt_{i}')
+            tf.keras.models.save_model(model=Q, filepath=c_dir, )
+            tf.keras.models.save_model(model=Q_target, filepath=ct_dir, )
+        a_dir = os.path.join(model_dir, 'alpha.npz', )
+        np.savez(file=a_dir, alpha=np.array(self.alpha), log_alpha=np.array(self.log_alpha))
     
     def remember(self, state, action, reward, state_, done, ):
         '''
@@ -275,7 +263,7 @@ class SACAgent(object):
     def learn_sample(self, state, action, reward, state_, done, ):
         self.learn_per_batch([state], [action], [reward], [state_], [done], )
     
-    def learn_per_batch(self, state, action, reward, state_, done, ):
+    def learn_per_batch(self, states, actions, rewards, next_states, dones, ):
         '''
         optimize the model for one batch
         :param state:
@@ -285,33 +273,16 @@ class SACAgent(object):
         :param done:
         :return:
         '''
-        state = np.array(state)
-        action = np.array(action, dtype=np.int32)
-        reward = np.array(reward, dtype=np.float32)
-        state_ = np.array(state_)
-        done = np.array(done, dtype=np.bool)
+        states, next_states = np.array(states), np.array(next_states)
+        actions = np.array(actions, dtype=np.int32)
+        rewards = np.array(rewards, dtype=np.float32)
+        dones = np.array(dones, dtype=np.bool)
         
-        target = self.model.predict(state)  # predict Q for starting state with the main network
-        target_old = np.array(target)
-        target_next = self.model.predict(state_)  # predict best action in ending state with the main network
-        if self.ddqn:
-            target_value = self.target_model.predict(state_)  # predict Q for ending state with the target network
+        Qs_values, Qs_losses = self.__update_critic__(states, actions, rewards, next_states, dones)
+        policy_losses = self.__update_actor__(states)
+        alpha_losses = self.__update_alpha__(states)
         
-        for i in range(len(done)):
-            # correction on the Q value for the action used
-            if done[i]:
-                target[i][action[i]] = reward[i]
-            else:
-                if self.ddqn:  # Double - DQN
-                    a = np.argmax(target_next[i])  # current Q Network selects the action
-                    target[i][action[i]] = reward[i] + self.discount_rate * (
-                        target_value[i][a])  # target Q Network to evaluate
-                else:  # Standard - DQN ---- DQN chooses the max Q value among next actions
-                    target[i][action[i]] = reward[i] + self.discount_rate * (np.amax(target_next[i]))
-        
-        self.model.fit(state, target, batch_size=min(len(done), self.batch_size), verbose=2)
-        
-        return target_old, target
+        return (Qs_values, Qs_losses), policy_losses, alpha_losses
     
     def replay(self, ):
         '''
@@ -319,27 +290,34 @@ class SACAgent(object):
         '''
         minibatch = random.sample(self.memory, min(len(self.memory), self.batch_size))
         
-        # minibatch = np.array(minibatch, dtype=object)
-        # state, action, reward, next_state, done = minibatch.T
-        # state, next_state = np.concatenate(state), np.concatenate(next_state)
-        # action = np.asarray(action, dtype=np.int32)
-        # reward = np.asarray(reward, dtype=np.float64)
-        # done = np.asarray(done, dtype=np.bool)
-        # state, action, reward, state_, done = list(zip(*minibatch))
-        # for i, i_state_ in enumerate(state_):
-        #     if i_state_ is None:
-        #         state_[i] = state[i]
         state, action, reward, state_, done = [], [], [], [], []
         for i_state, i_action, i_reward, i_state_, i_done in minibatch:
             state.append(i_state), action.append(i_action), reward.append(i_reward), done.append(i_done)
             state_.append(i_state_ if (i_state_ is not None) else i_state)
+        state, state_ = np.array(state), np.array(state_)
+        action = np.array(action, dtype=np.int32)
+        reward = np.array(reward, dtype=np.float32)
+        done = np.array(done, dtype=np.bool)
         
-        target_old, target = self.learn_per_batch(state, action, reward, state_, done)
+        return state, action, reward, state_, done
     
     def learn(self, learnTimes=None):
         learnTimes = self.learnTimes if learnTimes is None else learnTimes
         for _ in range(learnTimes):
-            self.replay()
+            state, action, reward, state_, done = self.replay()
+            self.learn_per_batch(state, action, reward, state_, done)
+    
+    def actions_and_log_probs(self, states):
+        """Given the state, produces an action, the probability of the action, the log probability of the action, and
+        the argmax action"""
+        
+        # states = self.feature_extractor.predict(states)
+        action_probs = self.policy(states)
+        log_action_probs = tf.math.log(action_probs + EPS)
+        max_prob_actions = tf.math.argmax(action_probs, axis=-1)
+        actions = tfp.distributions.Categorical(probs=action_probs, dtype=tf.int32).sample()  # .cpu()
+        
+        return actions, (action_probs, log_action_probs), max_prob_actions
     
     def act(self, state, **kwargs):
         '''
@@ -348,11 +326,10 @@ class SACAgent(object):
         :return:
         '''
         action_prob = self.predict(state)
-        # max_prob_action = np.argmax(action_prob, dim=-1)
-        action_distribution = tfp.distributions.Categorical(probs=action_prob, )
-        action = action_distribution.sample()  # .cpu()
         # log_action_prob = np.log(action_prob + EPS)
-        return action, action_prob[int(action)]  # (action_prob, log_action_prob)  # , max_prob_action
+        # max_prob_action = np.argmax(action_prob, dim=-1)
+        action = tfp.distributions.Categorical(probs=action_prob, dtype=tf.int32).sample()[0]  # .cpu()
+        return np.asarray(action), (float(action_prob[0][action]), float(self.alpha.numpy()))
     
     def predict(self, state, ):
         '''

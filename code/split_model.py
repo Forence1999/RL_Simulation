@@ -16,10 +16,10 @@ from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras.layers import Dense, Activation, Input, Conv2D, Flatten, Lambda, Add, BatchNormalization, Reshape
 
 
-def split_model(model_dir='../model/female_model'):
+def split_model(model_dir='../model/base_model_fullData_woBN'):
     full_ckpt = os.path.join(model_dir, 'full_model', 'ckpt')
     fe_ckpt = os.path.join(model_dir, 'feature_extractor', 'ckpt')
-    cls_ckpt = os.path.join(model_dir, 'classifer', 'ckpt')
+    cls_ckpt = os.path.join(model_dir, 'classifier', 'ckpt')
     
     full_model = tf.keras.models.load_model(full_ckpt)
     print('-' * 20, 'full_model', '-' * 20, )
