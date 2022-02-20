@@ -42,7 +42,7 @@ def D3QN_Classifier(dueling=True, base_model_dir='../model/base_model/', loadTar
             # base_classifier = Model(inputs=input, outputs=reshape(conv(input)))
         
         else:
-            print('-' * 20, 'Even the classifier is initialized randomly...', '-' * 20, )
+            print('-' * 20, 'The classifier is initialized randomly...', '-' * 20, )
             base_classifier = Sequential([
                 Input(shape=(30, 8, 82), name='feature_input'),
                 Conv2D(1, kernel_size=(30, 1), strides=(1, 1), padding='valid', use_bias=True),

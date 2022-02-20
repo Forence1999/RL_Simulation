@@ -175,27 +175,28 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='parameters for D3QN agent.')
     
     parser.add_argument('--agent_learn', type=ast.literal_eval, default=True, help='')
-    parser.add_argument('--episodes', type=int, default=100000000, help='')
+    parser.add_argument('--episodes', type=int, default=4000, help='')
     parser.add_argument('--policy_lr', type=float, default=3e-4, help='')
     parser.add_argument('--Q_lr', type=float, default=3e-4, help='')
     parser.add_argument('--alpha_lr', type=float, default=3e-4, help='')
     parser.add_argument('--reward_discount_rate', type=float, default=0.75, help='')
     
     parser.add_argument('--learnTimes', type=int, default=8, help='')
-    parser.add_argument('--batch_size', type=int, default=32, help='')
-    parser.add_argument('--memory_size', type=int, default=1024, help='')
+    parser.add_argument('--batch_size', type=int, default=128, help='')
+    parser.add_argument('--memory_size', type=int, default=4096, help='')
     
     parser.add_argument('--softUpdate', type=ast.literal_eval, default=True, help='')
     parser.add_argument('--num_update_episode', type=int, default=1, help='')
     parser.add_argument('--softUpdate_tau', type=float, default=0.01, help='')
     
-    parser.add_argument('--base_model_dir', type=str, default='../model/base_model_fullData_woBN', help='')
-    parser.add_argument('--agent_model_dir', type=str, default='../model/sac_model', help='')
-    parser.add_argument('--model_name', type=str,
-                        default='20220214-004841_SAC_lr-p-0.0003-Q-0.0003-a-0.0003_up-1-8-tau-0.01_mom-1024-32_rwd-1.0-0.75',
-                        help='')
-    parser.add_argument('--load_sac_model', type=ast.literal_eval, default=True, help='')
+    parser.add_argument('--base_model_dir', type=str, default='../model/base_model_fullData_wBN', help='')
     parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=True, help='')
+    
+    parser.add_argument('--agent_model_dir', type=str, default='../model/sac_model', help='')
+    # parser.add_argument('--model_name', type=str,
+    #                     default='20220214-004841_SAC_lr-p-0.0003-Q-0.0003-a-0.0003_up-1-8-tau-0.01_mom-1024-32_rwd-1.0-0.75',
+    #                     help='')
+    parser.add_argument('--load_sac_model', type=ast.literal_eval, default=False, help='')
     
     args = vars(parser.parse_args())
     print('RL config:', args)
