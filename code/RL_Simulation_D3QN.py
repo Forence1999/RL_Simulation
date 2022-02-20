@@ -16,10 +16,10 @@ from lib import utils
 
 
 class RL_game():
-    def __init__(self, agent_learn=True, reward_discount_rate=0.75, lr=0.0001, dueling=True, softUpdate_tau=0.1,
+    def __init__(self, agent_learn=True, reward_discount_rate=0.75, lr=0.0001, softUpdate_tau=0.1,
                  batch_size=64, learnTimes=1, episodes=500, eps_decay=False, min_eps=0.1,
                  base_model_dir='../model/base_model', load_d3qn_model=False, based_on_base_model=True,
-                 num_update_episode=10, d3qn_model_dir=None, model_name=None, **kwargs):
+                 num_update_episode=1, d3qn_model_dir=None, model_name=None, memory_size=1024, **kwargs):
         super(RL_game, self).__init__()
         self.AGENT_CLASS = 'D3QN'
         # self.agent_learn = True
@@ -28,7 +28,7 @@ class RL_game():
         self.max_episode_steps = 30  # 一个episode最多探索多少步，超过则强行终止。
         # self.num_update_episode = 10  # update target model and reward graph & data
         self.num_update_episode = num_update_episode  # update target model and reward graph & data
-        self.num_save_episode = 1000
+        self.num_save_episode = 100
         self.num_smooth_reward = 20
         self.num_plot_episode = 100
         
@@ -39,8 +39,7 @@ class RL_game():
         # self.lr = 0.00001  # [1e-5, 3e-4]
         self.lr = lr  # [1e-5, 3e-4]
         self.ddqn = True
-        # self.dueling = True
-        self.dueling = dueling
+        self.dueling = True
         self.softUpdate = True
         # self.softUpdate_tau = 0.1
         self.softUpdate_tau = softUpdate_tau
@@ -49,8 +48,8 @@ class RL_game():
         self.usePER = False
         # self.batch_size = 64
         self.batch_size = batch_size
-        self.memory_size = 1024
-        # self.memory_size = memory_size
+        # self.memory_size = 1024
+        self.memory_size = memory_size
         # self.episodes = 500
         self.episodes = episodes
         # self.eps_decay = False
@@ -170,8 +169,9 @@ class RL_game():
             if (episode_idx + 1) % self.num_plot_episode == 0:
                 self.plot_and_save_rewards(episode_rewards)
             if (episode_idx + 1) % self.num_save_episode == 0:
-                pass
-                # self.agent.save_model()
+                # print('Skipping saving model...')
+                print('Done! Saving model...')
+                self.agent.save_model()
         
         self.plot_and_save_rewards(episode_rewards)
 
@@ -208,22 +208,21 @@ if __name__ == '__main__':
     
     parser.add_argument('--agent_learn', type=ast.literal_eval, default=True, help='')
     parser.add_argument('--lr', type=float, default=0.0001, help='')
-    parser.add_argument('--batch_size', type=int, default=32, help='')
+    parser.add_argument('--batch_size', type=int, default=128, help='')
+    parser.add_argument('--memory_size', type=int, default=4096, help='')
     parser.add_argument('--learnTimes', type=int, default=8, help='')
     parser.add_argument('--num_update_episode', type=int, default=1, help='')
     parser.add_argument('--softUpdate_tau', type=float, default=0.01, help='')
-    parser.add_argument('--episodes', type=int, default=100000, help='')
+    parser.add_argument('--episodes', type=int, default=1500, help='')
     parser.add_argument('--reward_discount_rate', type=float, default=0.75, help='')
     
-    parser.add_argument('--dueling', type=ast.literal_eval, default=True, help='')
-    # parser.add_argument('--memory_size', type=int, default=1024, help='')
     parser.add_argument('--eps_decay', type=ast.literal_eval, default=False, help='')
-    parser.add_argument('--min_eps', type=float, default=0.01, help='')
-    parser.add_argument('--base_model_dir', type=str, default='../model/base_model_fullData_woBN', help='')
+    parser.add_argument('--min_eps', type=float, default=0.1, help='')
+    parser.add_argument('--base_model_dir', type=str, default='../model/base_model_fullData_wBN', help='')
     parser.add_argument('--d3qn_model_dir', type=str, default='../model/d3qn_model', help='')
-    parser.add_argument('--model_name', type=str, default='Dueling_DDQN_softUpdate__lr_0.0001_20220212-235802', help='')
-    parser.add_argument('--load_d3qn_model', type=ast.literal_eval, default=True, help='')
-    parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=True, help='')
+    # parser.add_argument('--model_name', type=str, default='Dueling_DDQN_softUpdate__lr_0.0001_20220212-235802', help='')
+    parser.add_argument('--load_d3qn_model', type=ast.literal_eval, default=False, help='')
+    parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=False, help='')
     
     args = vars(parser.parse_args())
     print('RL config:', args)

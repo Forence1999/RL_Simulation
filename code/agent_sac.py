@@ -242,12 +242,16 @@ class SACAgent(object):
         save the experience to memory buffer.
         '''
         
-        # extract feature to remember
-        state = self.feature_extractor.predict(np.array([state]))[0]
         if state_ is not None:
             state_ = self.feature_extractor.predict(np.array([state_]))[0]
-        experience = state, action, reward, state_, done
-        self.memory.append(experience)
+        
+        for i in range(4):
+            state = np.roll(state, shift=2, axis=-1)
+            action = (action + 8 - 2) % 8
+            # extract feature to remember
+            feature_state = self.feature_extractor.predict(np.array([state]))[0]
+            experience = feature_state, action, reward, state_, done
+            self.memory.append(experience)
     
     def remember_batch(self, batch_experience, useDiscount=True):
         '''
