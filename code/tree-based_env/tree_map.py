@@ -2,14 +2,17 @@
 # -*- coding:utf-8 _*-
 # @Author: swang
 # @Contact: wang00sheng@gmail.com
-# @Project Name: RL_Simulation
-# @File: Env_MAP.py
-# @Time: 2021/10/31/10:19
+# @Project Name: d3qn.py
+# @File: temp.py
+# @Time: 2022/02/20/15:29
 # @Software: PyCharm
 
+import os, sys
 
-import os
-import sys
+F_dir = os.path.dirname(os.path.abspath(__file__))
+FF_dir = os.path.dirname(F_dir)
+sys.path.append(FF_dir)
+
 import time
 import random
 import numpy as np
@@ -17,32 +20,292 @@ from copy import deepcopy
 import networkx as nx
 import pickle
 from lib import utils
+from matplotlib import pyplot as plt
+
+EPS = np.finfo(float).eps * 4
+global_ID = 20  # leave the previous IDs for Rooms
+MIN_LINE_LENGTH = 40
+
+
+# 新的基于树的环境与先前仅仅包含房间的环境有很大的不同：
+# 在这个环境中，将每个房间看作是一个树的节点，并不断进行更加精细化地分为四叉树或者二叉树（基于房间长度是否大于预设的最短长度，以确保小车走过之后，该区域无人）。
+# 对于每一个节点，都不知道自己的旁边是否有墙，旁边的节点又是谁，而只能向父节点查询，直到根节点。
+# 每个节点的四个坐标均为顺时针方向：房间区域无起点保障，四叉树子节点从父节点中心开始，二叉树节点从父节点的中间线开始。
+# 对于父节点来说，孩子的相对顺序并无保证，仅确定按照顺时针进行排列。
 
 
 class Node(object):
-    def __init__(self, ):
+    def __init__(self, vertex, center=None, parent=None, id=None):
         super(Node, self).__init__()
         
-        self.existWall = [False] * 8
-        self.isLeaf = False
-        self.children = False
-        self.vertex = [None] * 4
-        self.center = None
+        self.id = self.__set_id__() if id is None else id
+        print(self.id)
+        
+        self.vertex = np.array(vertex)
+        print(self.vertex)
+        self.line_centers = [Node.calculate_line_center(self.vertex[i], self.vertex[(i + 1) % 4]) for i in range(4)]
+        self.center = Node.calculate_lines_cross_point([self.line_centers[0], self.line_centers[2]],
+                                                       [self.line_centers[1], self.line_centers[3]],
+                                                       exist_parallel=True, )  # 中心点并非四边形两条对角线的中点，而是两对对边中点相连的交点
+        self.parent = parent
+        self.children = self.__generate_children__()
+        self.isLeaf = True if self.children is None else False
+        self.num_children = 0 if self.isLeaf else len(self.children)
+        self.center = self.center if center is None else center  # 生成子节点后更正center，以便于后续数据处理。因此，center不一定再是真正的子节点划分中心
     
-    def set_coordinate(self, coordinate, ):
-        self.coordinate = np.array(coordinate)
+    def __generate_children__(self, ):
+        line1, line2 = self.vertex[:2], self.vertex[1:3]
+        length1, length2 = Node.calculate_line_length(*line1, ), Node.calculate_line_length(*line2, )
+        
+        if length1 > MIN_LINE_LENGTH and length2 > MIN_LINE_LENGTH:
+            vertex0 = [self.center, self.line_centers[3], self.vertex[0], self.line_centers[0]]
+            vertex1 = [self.center, self.line_centers[0], self.vertex[1], self.line_centers[1]]
+            vertex2 = [self.center, self.line_centers[1], self.vertex[2], self.line_centers[2]]
+            vertex3 = [self.center, self.line_centers[2], self.vertex[3], self.line_centers[3]]
+            
+            return [Node(vertex0, parent=self), Node(vertex1, parent=self),
+                    Node(vertex2, parent=self), Node(vertex3, parent=self), ]
+        
+        elif length1 > MIN_LINE_LENGTH and length2 <= MIN_LINE_LENGTH:
+            vertex0 = [self.line_centers[0], self.line_centers[2], self.vertex[3], self.vertex[0], ]
+            vertex1 = [self.line_centers[2], self.line_centers[0], self.vertex[1], self.vertex[2], ]
+            
+            return [Node(vertex0, parent=self), Node(vertex1, parent=self), ]
+        
+        elif length1 <= MIN_LINE_LENGTH and length2 > MIN_LINE_LENGTH:
+            vertex0 = [self.line_centers[1], self.line_centers[3], self.vertex[0], self.vertex[1], ]
+            vertex1 = [self.line_centers[3], self.line_centers[1], self.vertex[2], self.vertex[3], ]
+            
+            return [Node(vertex0, parent=self), Node(vertex1, parent=self), ]
+        
+        else:
+            return None
     
-    def set_neighbors(self, neighbors, ):
-        self.neighbors = np.array(neighbors)
+    @staticmethod
+    def calculate_line_length(point1, point2, ):
+        '''
+        :param point1: (x1, y1)
+        :param point2: (x2, y2)
+        :return: length of the line segment
+        '''
+        point1, point2, = np.asarray(point1), np.asarray(point2),
+        return np.linalg.norm(point1 - point2, ord=2, axis=-1)
     
-    def set_id(self, id, ):
-        self.id = id
+    @staticmethod
+    def calculate_line_center(point1, point2, ):
+        return np.mean([point1, point2], axis=0, )
+    
+    @staticmethod
+    def calculate_general_line_form(point1, point2, ):
+        (x1, y1), (x2, y2) = point1, point2,
+        a = y2 - y1
+        b = x1 - x2
+        c = x2 * y1 - x1 * y2
+        return a, b, c
+    
+    @staticmethod
+    def calculate_lines_cross_point(line1, line2, exist_parallel=True):
+        '''
+        :param line1: [(x1, y1), (x2, y2)]
+        :param line2:
+        :param exist_parallel: False: Force to return the intersection point at infinity
+        :return:
+        '''
+        a1, b1, c1 = Node.calculate_general_line_form(*line1)
+        a2, b2, c2 = Node.calculate_general_line_form(*line2)
+        D = a1 * b2 - a2 * b1
+        if abs(D) < EPS:
+            if exist_parallel:
+                print('Warning: The two lines are parallel')
+                return None
+            else:
+                D = np.sign(D) * (abs(D) + EPS)
+        
+        x = (b1 * c2 - b2 * c1) / D
+        y = (a2 * c1 - a1 * c2) / D
+        return (x, y)
+    
+    def __set_id__(self, id=None, ):
+        if id is not None:
+            return id
+        else:
+            global global_ID
+            global_ID += 1
+            return global_ID
     
     def get_neighbor(self, ):
         return self.neighbors
     
-    def get_coordinate(self, ):
-        return self.coordinate
+    def get_center(self, ):
+        return self.center
+    
+    def show(self, ):
+        def DFS(node, region_info):
+            '''
+            Depth_First_Search to get all the region_info (id, vertexes, center)
+            '''
+            region_info.append((node.id, node.vertex, node.center,))
+            
+            if not node.isLeaf:
+                for child in node.children:
+                    DFS(child, region_info)
+        
+        region_info = []
+        DFS(self, region_info)
+        
+        for id, vertex, center in region_info:
+            color = [random.uniform(0, 1, ) for _ in range(3)]
+            x, y = list(zip(*vertex))
+            plt.fill(x, y, color=color, alpha=0.1)
+            plt.text(*center, str(id), fontsize=10, ha='center', va='center', )
+        plt.show()
+
+
+class Tree_Root(object):
+    def __init__(self, ):
+        super(Tree_Root, self).__init__()
+        centers = [None,  # 0
+                   [60, 425],  # 1
+                   [160, 320],  # 2
+                   [340, 425],  # 3
+                   [530, 320],  # 4
+                   None,  # 5 [215, 220]
+                   None,  # 6 [170, 160]
+                   None,  # 7 [220, 100]
+                   [280, 160],  # 8
+                   [220, 15],  # 9
+                   [460, 15],  # 10
+                   None,  # 11 [420, 220]
+                   [160, 425],  # 12
+                   [530, 425],  # 13
+                   [280, 220],  # 14
+                   None,  # 15 [280, 100]
+                   [280, 15],  # 16
+                   [160, 220],  # 17
+                   [530, 220],  # 18
+                   None,  # 19 [170, 100]
+                   [550, 15],  # 20
+                   ]
+        vertexes = [None,  # 0
+                    [(4, 450), (145, 450), (145, 418), (4, 418)],  # 1
+                    [(145, 418), (175, 418), (175, 250), (145, 250)],  # 2
+                    [(175, 450), (515, 450), (515, 418), (175, 418)],  # 3
+                    [(515, 418), (545, 418), (545, 250), (515, 250)],  # 4
+                    None,  # 5
+                    None,  # 6
+                    None,  # 7
+                    [(250, 210), (317, 210), (317, 42), (250, 42)],  # 8
+                    [(180, 42), (250, 42), (250, 12), (180, 12)],  # 9
+                    [(317, 42), (500, 42), (500, 12), (317, 12)],  # 10
+                    None,  # 11
+                    [(145, 450), (175, 450), (175, 418), (145, 418)],  # 12
+                    [(515, 450), (545, 450), (545, 418), (515, 418)],  # 13
+                    [(250, 250), (317, 250), (317, 210), (250, 210)],  # 14
+                    None,  # 15
+                    [(250, 42), (317, 42), (317, 12), (250, 12)],  # 16
+                    [(145, 250), (175, 250), (175, 210), (145, 210)],  # 17
+                    [(515, 250), (545, 250), (545, 210), (515, 210)],  # 18
+                    None,  # 19
+                    [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
+                    ]
+        self.centers = np.array(centers, dtype=object)
+        self.vertexes = np.array(vertexes, dtype=object)
+        self.num_room = len(self.centers) - sum(self.centers == None)
+        self.rooms = self.__create_rooms__(vertexes=self.vertexes, centers=self.centers, parent=self)
+        
+        adjacency = np.load('./adjacency_list.npz')['adjacency_list']
+        self.adjacency = np.array(adjacency)  # num_room * num_room: [i, j]: the direction (map_adj[i, j]) of i is j
+        self.print_room_info()
+        
+        self.graph = self.construct_graph()  # a graph of map nodes to represent direct distance
+    
+    def __create_rooms__(self, vertexes, centers=None, parent=None):
+        rooms = []
+        centers = [None, ] * len(vertexes) if centers is None else centers
+        for idx, (vertex, center) in enumerate(zip(vertexes, centers)):
+            if vertex is None:
+                rooms.append(None)
+            else:
+                rooms.append(Node(vertex=vertex, center=center, parent=parent, id=idx))
+        
+        return rooms
+    
+    def print_room_info(self, ):
+        '''
+        print the info of every room
+        :return:
+        '''
+        print('-' * 20, 'Info of Rooms', '-' * 20, )
+        for i, room in enumerate(self.rooms):
+            if room is None:
+                continue
+            adjacency = self.adjacency[i]
+            neighbors = np.full(shape=(8,), fill_value=None, dtype=object)
+            rooms = np.where(adjacency != np.inf)[0]
+            directions = adjacency[rooms].astype(int)
+            neighbors[directions] = list(rooms)
+            print('id: ', room.id, '\n',
+                  'directions: ', list(range(8)), '\n',
+                  'neighbors:  ', neighbors)
+        print('-' * 20, 'Finish printing graph', '-' * 20, )
+    
+    def construct_graph(self, ):
+        '''
+        based on the adjacency and coordinates of nodes in the map, construct a graph with networkx and return it.
+        :return: a networkx graph
+        '''
+        adjacency = np.array(self.adjacency)
+        row, col = np.where(adjacency != np.inf)
+        
+        G = nx.Graph()
+        for i in {*row, *col}:  # 节点索引 (id) 集合
+            G.add_node(i)
+        for i, j in zip(row, col):
+            distance = Node.calculate_line_length(self.centers[i], self.centers[j])
+            G.add_weighted_edges_from([(i, j, distance)])
+        
+        return G
+    
+    def show_graph(self, ):
+        pos_dict = dict(enumerate(self.centers))
+        
+        fig, ax = plt.subplots()
+        nx.draw(self.graph, ax=ax, with_labels=True, pos=pos_dict)
+        plt.show()
+    
+    def show_rooms(self, ):
+        def DFS(node, region_info):
+            '''
+            Depth_First_Search to get all the region_info (id, vertexes, center)
+            '''
+            region_info.append((node.id, node.vertex, node.center,))
+            
+            if not node.isLeaf:
+                for child in node.children:
+                    DFS(child, region_info)
+        
+        region_info = []
+        for room in self.rooms:
+            if room is None:
+                continue
+            DFS(room, region_info)
+        
+        plt.figure(dpi=300)
+        for id, vertex, center in region_info:
+            color = [random.uniform(0, 1, ) for _ in range(3)]
+            x, y = list(zip(*vertex))
+            plt.fill(x, y, color=color, alpha=0.1)
+            plt.text(*center, str(id), fontsize=3, ha='center', va='center', )
+        plt.show()
+    
+    def show_tree(self, ):
+        
+        pass
+    
+    def show(self, ):
+        self.show_graph()
+        self.show_rooms()
+        self.show_tree()
 
 
 class Map_graph(object):
@@ -317,15 +580,21 @@ if __name__ == '__main__':
     # print(adjacency_list)
     
     print('Hello World!')
+    # import matplotlib.pyplot as plt
+    #
+    # ds_path = '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
+    # map_graph = Map_graph(ds_path=ds_path)
+    # pos_dict = dict(enumerate(map_graph.coordinates))
+    #
+    # fig, ax = plt.subplots()
+    # nx.draw(map_graph.map_graph, ax=ax, with_labels=True, pos=pos_dict)
+    # plt.show()
     
-    import matplotlib.pyplot as plt
+    # vertex = [(0, 0), (0, 100), (100, 100), (100, 0)]
+    # node = Node(vertex=vertex)
+    # node.show()
     
-    ds_path = '../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
-    map_graph = Map_graph(ds_path=ds_path)
-    pos_dict = dict(enumerate(map_graph.coordinates))
-    
-    fig, ax = plt.subplots()
-    nx.draw(map_graph.map_graph, ax=ax, with_labels=True, pos=pos_dict)
-    plt.show()
+    root = Tree_Root()
+    root.show()
     
     print('Brand-new World!')
