@@ -27,13 +27,6 @@ global_ID = 20  # leave the previous IDs for Rooms
 MIN_LINE_LENGTH = 40
 
 
-# 新的基于树的环境与先前仅仅包含房间的环境有很大的不同：
-# 在这个环境中，将每个房间看作是一个树的节点，并不断进行更加精细化地分为四叉树或者二叉树（基于房间长度是否大于预设的最短长度，以确保小车走过之后，该区域无人）。
-# 对于每一个节点，都不知道自己的旁边是否有墙，旁边的节点又是谁，而只能向父节点查询，直到根节点。
-# 每个节点的四个坐标均为顺时针方向：房间区域无起点保障，四叉树子节点从父节点中心开始，二叉树节点从父节点的中间线开始。
-# 对于父节点来说，孩子的相对顺序并无保证，仅确定按照顺时针进行排列。
-
-
 class Region(object):
     def __init__(self, vertex, center=None, parent=None, id=None):
         super(Region, self).__init__()
@@ -46,12 +39,14 @@ class Region(object):
         self.line_centers = [Region.calculate_line_center(self.vertex[i], self.vertex[(i + 1) % 4]) for i in range(4)]
         self.center = Region.calculate_lines_cross_point([self.line_centers[0], self.line_centers[2]],
                                                          [self.line_centers[1], self.line_centers[3]],
-                                                         exist_parallel=True, )  # 中心点并非四边形两条对角线的中点，而是两对对边中点相连的交点
+                                                         exist_parallel=True, )
+        # This center point is not the midpoint of the two diagonals of the quadrilateral,
+        # but the intersection of the midpoints of the two pairs of opposite sides.
         self.parent = parent
         self.children = self.__generate_children__()
         self.isLeaf = True if self.children is None else False
         self.num_children = 0 if self.isLeaf else len(self.children)
-        self.center = self.center if center is None else center  # 生成子节点后更正center，以便于后续数据处理。因此，center不一定再是真正的子节点划分中心
+        self.center = self.center if center is None else center  # This adjusted center is not the one for child division any more.
     
     def __generate_children__(self, ):
         line1, line2 = self.vertex[:2], self.vertex[1:3]
@@ -162,10 +157,414 @@ class Region(object):
 
 
 class House(object):
-    def __init__(self, ):
+    def __init__(self, centers=None, vertexes=None, ):
         super(House, self).__init__()
         self.id = 0
         self.center = (270, 225)
+        centers = [None,  # 0
+                   [60, 425],  # 1
+                   [160, 320],  # 2
+                   [340, 425],  # 3
+                   [530, 320],  # 4
+                   None,  # 5 [215, 220]
+                   None,  # 6 [170, 160]
+                   None,  # 7 [220, 100]
+                   [280, 160],  # 8
+                   [220, 15],  # 9
+                   [460, 15],  # 10
+                   None,  # 11 [420, 220]
+                   [160, 425],  # 12
+                   [530, 425],  # 13
+                   [280, 220],  # 14
+                   None,  # 15 [280, 100]
+                   [280, 15],  # 16
+                   [160, 220],  # 17
+                   [530, 220],  # 18
+                   None,  # 19 [170, 100]
+                   [550, 15],  # 20
+                   ] if centers is None else centers
+        vertexes = [None,  # 0
+                    [(4, 450), (145, 450), (145, 418), (4, 418)],  # 1
+                    [(145, 418), (175, 418), (175, 250), (145, 250)],  # 2
+                    [(175, 450), (515, 450), (515, 418), (175, 418)],  # 3
+                    [(515, 418), (545, 418), (545, 250), (515, 250)],  # 4
+                    None,  # 5
+                    None,  # 6
+                    None,  # 7
+                    [(250, 210), (317, 210), (317, 42), (250, 42)],  # 8
+                    [(180, 42), (250, 42), (250, 12), (180, 12)],  # 9
+                    [(317, 42), (500, 42), (500, 12), (317, 12)],  # 10
+                    None,  # 11
+                    [(145, 450), (175, 450), (175, 418), (145, 418)],  # 12
+                    [(515, 450), (545, 450), (545, 418), (515, 418)],  # 13
+                    [(250, 250), (317, 250), (317, 210), (250, 210)],  # 14
+                    None,  # 15
+                    [(250, 42), (317, 42), (317, 12), (250, 12)],  # 16
+                    [(145, 250), (175, 250), (175, 210), (145, 210)],  # 17
+                    [(515, 250), (545, 250), (545, 210), (515, 210)],  # 18
+                    None,  # 19
+                    [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
+                    ] if vertexes is None else vertexes
+        self.centers = np.array(centers, dtype=object)
+        self.vertexes = np.array(vertexes, dtype=object)
+        self.num_room = len(self.centers) - sum(self.centers == None)
+        self.rooms = self.__create_rooms__(vertexes=self.vertexes, centers=self.centers, parent=self)
+        
+        adjacency = np.load('./adjacency_list.npz')['adjacency_list']
+        self.adjacency = np.array(adjacency)  # num_room * num_room: [i, j]: the direction (map_adj[i, j]) of i is j
+        # self.print_house_info()
+        
+        self.graph = self.construct_graph()  # a graph of map nodes to represent direct distance
+        
+        self.set_neighbors()
+    
+    def __create_rooms__(self, vertexes, centers=None, parent=None):
+        rooms = []
+        centers = [None, ] * len(vertexes) if centers is None else centers
+        for idx, (vertex, center) in enumerate(zip(vertexes, centers)):
+            if vertex is None:
+                rooms.append(None)
+            else:
+                rooms.append(Region(vertex=vertex, center=center, parent=parent, id=idx))
+        
+        return rooms
+    
+    def get_nodes(self):
+        def DFS(node, node_ls):
+            ''' Depth_First_Search to get all the nodes in the map '''
+            node_ls.append(node)
+            if not node.isLeaf:
+                for child in node.children:
+                    DFS(child, node_ls)
+        
+        node_ls = []
+        for room in self.rooms:
+            if room is not None:
+                DFS(room, node_ls)
+        
+        return node_ls
+    
+    def get_leaves(self, ):
+        def DFS(node, leaf_ls):
+            ''' Depth_First_Search to get all the leaves '''
+            
+            if node.isLeaf:
+                leaf_ls.append(node)
+            else:
+                for child in node.children:
+                    DFS(child, leaf_ls)
+        
+        leaf_ls = []
+        for room in self.rooms:
+            if room is not None:
+                DFS(room, leaf_ls)
+        
+        return leaf_ls
+    
+    def print_house_info(self, ):
+        '''
+        print the info of every room
+        :return:
+        '''
+        print('-' * 20, 'Info of House', '-' * 20, )
+        for i, room in enumerate(self.rooms):
+            if room is None:
+                continue
+            adjacency = self.adjacency[i]
+            neighbors = np.full(shape=(8,), fill_value='', dtype=object)
+            rooms = np.where(adjacency != np.inf)[0]
+            directions = adjacency[rooms].astype(int)
+            neighbors[directions] = list(rooms)
+            print('id: ', room.id, '\n',
+                  'directions: ', list(range(8)), '\n',
+                  'neighbors:  ', neighbors)
+        print('-' * 20, 'Finish printing info of House', '-' * 20, )
+    
+    def construct_graph(self, ):
+        '''
+        based on the adjacency and coordinates of nodes in the map, construct a graph with networkx and return it.
+        :return: a networkx graph
+        '''
+        adjacency = np.array(self.adjacency)
+        row, col = np.where(adjacency != np.inf)
+        
+        G = nx.Graph()
+        nodes = {*row, *col}
+        G.add_nodes_from(nodes)  # 节点索引 (id) 集合
+        edges = [(i, j, Region.calculate_line_length(self.centers[i], self.centers[j])) for i, j in zip(row, col)]
+        G.add_weighted_edges_from(edges)
+        
+        return G
+    
+    def construct_tree(self, ):
+        '''
+        based on the adjacency and coordinates of nodes in the map, construct a graph with networkx and return it.
+        :return: a networkx graph
+        '''
+        from treelib import Tree
+        def DFS(node, region_info):
+            '''
+            Depth_First_Search to get all the region_info (id, vertexes, center)
+            '''
+            region_info.append((node.parent.id, node.parent.center, node.id, node.center,))
+            
+            if not node.isLeaf:
+                for child in node.children:
+                    DFS(child, region_info)
+        
+        region_info = []
+        for room in self.rooms:
+            if room is None:
+                continue
+            DFS(room, region_info)
+        region_info = np.array(region_info, dtype=object)
+        
+        T = Tree(identifier=0)
+        T.create_node(identifier=0, )
+        for parent, _, child, _ in region_info:
+            T.create_node(identifier=child, parent=parent, )
+        
+        # G = nx.DiGraph()
+        # nodes = {*region_info[:, 0], *region_info[:, 2]}
+        # G.add_nodes_from(nodes)  # 节点索引 (id) 集合
+        # edges = [(i, j, 10) for i, ic, j, jc in region_info]
+        # G.add_weighted_edges_from(edges)
+        #
+        # return G
+        
+        return T
+    
+    def show_graph(self, ):
+        pos_dict = dict(enumerate(self.centers))
+        
+        fig, ax = plt.subplots()
+        nx.draw(self.graph, ax=ax, with_labels=True, pos=pos_dict)
+        plt.show()
+    
+    def show_rooms(self, ):
+        nodes = self.get_nodes()
+        region_info = [(node.id, node.vertex, node.center,) for node in nodes]
+        
+        plt.figure(dpi=300)
+        for id, vertex, center in region_info:
+            color = [random.uniform(0, 1, ) for _ in range(3)]
+            x, y = list(zip(*vertex))
+            plt.fill(x, y, color=color, alpha=0.1)
+            plt.text(*center, str(id), fontsize=3, ha='center', va='center', )
+        plt.show()
+    
+    def show_tree(self, ):
+        tree = self.construct_tree()
+        # fig, ax = plt.subplots()
+        # nx.draw(tree, ax=ax, with_labels=True, )
+        # plt.show()
+        tree.show()
+    
+    def show_leaves(self, ):
+        leaves = self.get_leaves()
+        leaf_info = [(leaf.id, leaf.vertex, leaf.center,) for leaf in leaves]
+        
+        plt.figure(dpi=300)
+        for id, vertex, center in leaf_info:
+            color = [random.uniform(0, 1, ) for _ in range(3)]
+            x, y = list(zip(*vertex))
+            plt.fill(x, y, color=color, alpha=0.1)
+            plt.text(*center, str(id), fontsize=3, ha='center', va='center', )
+        plt.show()
+    
+    def show(self, ):
+        self.show_graph()
+        self.show_rooms()
+        self.show_tree()
+        self.show_leaves()
+        self.show_neighbors_of_leaves()
+    
+    def set_neighbors(self, ):
+        
+        def find_node_of_direction(img, id, center, transform):
+            def verify_PointLegitimacy(point, img):
+                x, y = point
+                return x >= 0 and x < img.shape[0] and y >= 0 and y < img.shape[1]
+            
+            def verify_EndSearch(counter: dict):
+                for key in counter.keys():
+                    if counter[key] > 10:
+                        return key
+                    elif (key == -1) and counter[key] > 3:
+                        return key
+                return False
+            
+            x, y = np.array(center)
+            counter = dict()
+            while verify_PointLegitimacy(point=(x, y), img=img):
+                if img[x, y] == id:
+                    counter = dict()
+                    x, y = transform(x, y)
+                    continue
+                elif img[x, y] == -1:
+                    counter[-1] = counter[-1] + 1 if -1 in counter else 1
+                else:
+                    counter[-1] = 0
+                    counter[img[x, y]] = counter[img[x, y]] + 1 if img[x, y] in counter else 1
+                if verify_EndSearch(counter) is not False:
+                    break
+                x, y = transform(x, y)
+            res = verify_EndSearch(counter)
+            # return None if ((res is False) or (res == -1)) else res
+            return None if ((res is False) or (res == -1)) else res
+        
+        import cv2
+        
+        leaves = self.get_leaves()
+        leaf_info = [(leaf.id, leaf.vertex, leaf.center,) for leaf in leaves]
+        ids, vertexes, centers = list(zip(*leaf_info))
+        y_max, x_max = np.ceil(np.max(vertexes, axis=(0, 1))).astype(int)
+        
+        leaf_img = np.full(shape=(x_max, y_max,), fill_value=-1, dtype=np.int32)
+        for id, vertex, _ in leaf_info:
+            vertex = np.rint(vertex).astype(int)
+            cv2.fillConvexPoly(leaf_img, vertex, id)
+        plt.imshow(leaf_img)
+        plt.show()
+        
+        # print('set neighbors...')
+        neighbors_ls = []
+        for id, _, center in leaf_info:
+            y, x = np.rint(center).astype(int)
+            transforms = [lambda x, y: (x, y + 1),  # 0
+                          lambda x, y: (x + 1, y + 1),  # 1
+                          lambda x, y: (x + 1, y),  # 2
+                          lambda x, y: (x + 1, y - 1),  # 3
+                          lambda x, y: (x, y - 1),  # 4
+                          lambda x, y: (x - 1, y - 1),  # 5
+                          lambda x, y: (x - 1, y),  # 6
+                          lambda x, y: (x - 1, y + 1),  # 7
+                          ]
+            neighbors = [find_node_of_direction(leaf_img, id, (x, y), transform) for transform in transforms]
+            neighbors_ls.append(neighbors)
+            # print(id, '\n', list(range(8)), '\n', neighbors)
+        for leaf, neighbors in zip(leaves, neighbors_ls):
+            neighbor_leafs = []
+            for neighbor_id in neighbors:
+                if neighbor_id is None:
+                    neighbor_leafs.append(None)
+                else:
+                    neighbor_leaf = leaves[np.where(neighbor_id == ids)[0][0]]
+                    neighbor_leafs.append(neighbor_leaf)
+            leaf.neighbors = neighbor_leafs
+        # print('set neighbors done.')
+    
+    def show_neighbors_of_leaves(self, ):
+        leaves = self.get_leaves()
+        for leaf in leaves:
+            neighbor_ids = []
+            for neighbor in leaf.neighbors:
+                if neighbor is None:
+                    neighbor_ids.append(None)
+                else:
+                    neighbor_ids.append(neighbor.id)
+            print(leaf.id, '\n', list(range(8)), '\n', neighbor_ids)
+
+
+class Dataset_Graph(object):
+    def __init__(self, ds_path, map_graph, centers=None):
+        super().__init__()
+        centers = [None,  # 0
+                   [60, 425],  # 1
+                   [160, 320],  # 2
+                   [340, 425],  # 3
+                   [530, 320],  # 4
+                   None,  # 5 [215, 220]
+                   None,  # 6 [170, 160]
+                   None,  # 7 [220, 100]
+                   [280, 160],  # 8
+                   [220, 15],  # 9
+                   [460, 15],  # 10
+                   None,  # 11 [420, 220]
+                   [160, 425],  # 12
+                   [530, 425],  # 13
+                   [280, 220],  # 14
+                   None,  # 15 [280, 100]
+                   [280, 15],  # 16
+                   [160, 220],  # 17
+                   [530, 220],  # 18
+                   None,  # 19 [170, 100]
+                   [550, 15],  # 20
+                   ] if centers is None else centers
+        self.centers = np.array(centers, dtype=object)
+        self.num_node = len(centers)
+        
+        self.ds_path = ds_path
+        self.ds_info = self.get_src_wk_info()  # store src and wk info
+        self.data_adj_ls = self.cal_data_adjacency_list()  # [src_nodes, wk_nodes]: store if wk_data exists for a src
+        self.graph = self.construct_data_graph(map_graph)  # a graph of map nodes to represent if data exists
+        
+        self.src_ids = np.where(np.any(self.data_adj_ls, axis=-1))[0]
+        # print('Number of src_ids: ', len(self.src_ids), '\n', 'src_ids: ', self.src_ids)
+        # self.print_data_info()
+    
+    def get_src_wk_info(self, ):
+        ''' store src and wk info to a dict '''
+        
+        # get src and walker info
+        ds_info = dict()
+        src_paths = utils.get_subdirs_by_prefix(root=self.ds_path, prefix='src_')
+        wk_paths = [utils.get_subdirs_by_prefix(root=i, prefix='walker_') for i in src_paths]
+        for src, wk in zip(src_paths, wk_paths):
+            ds_info[os.path.basename(src)] = [os.path.basename(i) for i in wk]
+        
+        return ds_info
+    
+    def cal_data_adjacency_list(self, ):
+        '''
+        generate a 2D array ([src_nodes, wk_nodes]) to represent if wk_data exists for a src.
+        :return:
+        '''
+        # cal_data_adjacency_list
+        
+        center_index = np.where(self.centers != None, )[0]
+        centers = np.array(list(self.centers[center_index]))
+        data_adj_ls = np.full((self.num_node, self.num_node), False)
+        for src_key in self.ds_info.keys():
+            src_coord = list(map(int, src_key.split('_')[1:3]))
+            src_idx = center_index[np.where(np.all(centers == [src_coord], axis=-1))[0][0]]
+            for wk_key in self.ds_info[src_key]:
+                wk_coord = list(map(int, wk_key.split('_')[1:3]))
+                wk_idx = center_index[np.where(np.all(centers == [wk_coord], axis=-1))[0][0]]
+                data_adj_ls[src_idx][wk_idx] = True
+            data_adj_ls[np.diag_indices_from(data_adj_ls)] = False
+        
+        return data_adj_ls
+    
+    def print_data_info(self, ):
+        ''' print the info of data '''
+        print('-' * 20, 'Data graph', '-' * 20, )
+        for src_id, adj_ls in enumerate(self.data_adj_ls):
+            wk_ids = np.where(adj_ls)[0]
+            if len(wk_ids) > 0:
+                print('src:', src_id, '-' * 4, 'wk:', np.where(adj_ls)[0])
+        print('-' * 20, 'Finish printing Data graph', '-' * 20, )
+    
+    def construct_data_graph(self, map_graph):  # src -> wk
+        ''' construct a graph with networkx to represent the distance from src_node to walker_node '''
+        row, col = np.asarray(np.where(self.data_adj_ls))
+        
+        G = nx.DiGraph()
+        nodes = {*row, *col}
+        G.add_nodes_from(nodes)  # 节点索引 (id) 集合
+        edges = [(i, j, nx.dijkstra_path_length(map_graph, source=i, target=j)) for i, j in zip(row, col)]
+        G.add_weighted_edges_from(edges)
+        
+        return G
+
+
+class Map_graph(object):
+    '''
+    Map for 4F_CYC
+    '''
+    
+    def __init__(self, ds_path, ):
+        super().__init__()
         centers = [None,  # 0
                    [60, 425],  # 1
                    [160, 320],  # 2
@@ -210,311 +609,11 @@ class House(object):
                     None,  # 19
                     [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
                     ]
-        self.centers = np.array(centers, dtype=object)
-        self.vertexes = np.array(vertexes, dtype=object)
-        self.num_room = len(self.centers) - sum(self.centers == None)
-        self.rooms = self.__create_rooms__(vertexes=self.vertexes, centers=self.centers, parent=self)
-        
-        adjacency = np.load('./adjacency_list.npz')['adjacency_list']
-        self.adjacency = np.array(adjacency)  # num_room * num_room: [i, j]: the direction (map_adj[i, j]) of i is j
-        self.print_room_info()
-        
-        self.map = self.construct_map()  # a graph of map nodes to represent direct distance
-    
-    def __create_rooms__(self, vertexes, centers=None, parent=None):
-        rooms = []
-        centers = [None, ] * len(vertexes) if centers is None else centers
-        for idx, (vertex, center) in enumerate(zip(vertexes, centers)):
-            if vertex is None:
-                rooms.append(None)
-            else:
-                rooms.append(Region(vertex=vertex, center=center, parent=parent, id=idx))
-        
-        return rooms
-    
-    def print_room_info(self, ):
-        '''
-        print the info of every room
-        :return:
-        '''
-        print('-' * 20, 'Info of Rooms', '-' * 20, )
-        for i, room in enumerate(self.rooms):
-            if room is None:
-                continue
-            adjacency = self.adjacency[i]
-            neighbors = np.full(shape=(8,), fill_value='', dtype=object)
-            rooms = np.where(adjacency != np.inf)[0]
-            directions = adjacency[rooms].astype(int)
-            neighbors[directions] = list(rooms)
-            print('id: ', room.id, '\n',
-                  'directions: ', list(range(8)), '\n',
-                  'neighbors:  ', neighbors)
-        print('-' * 20, 'Finish printing graph', '-' * 20, )
-    
-    def construct_map(self, ):
-        '''
-        based on the adjacency and coordinates of nodes in the map, construct a graph with networkx and return it.
-        :return: a networkx graph
-        '''
-        adjacency = np.array(self.adjacency)
-        row, col = np.where(adjacency != np.inf)
-        
-        G = nx.Graph()
-        nodes = {*row, *col}
-        G.add_nodes_from(nodes)  # 节点索引 (id) 集合
-        edges = [(i, j, Region.calculate_line_length(self.centers[i], self.centers[j])) for i, j in zip(row, col)]
-        G.add_weighted_edges_from(edges)
-        
-        return G
-    
-    def show_map(self, ):
-        pos_dict = dict(enumerate(self.centers))
-        
-        fig, ax = plt.subplots()
-        nx.draw(self.map, ax=ax, with_labels=True, pos=pos_dict)
-        plt.show()
-    
-    def show_rooms(self, ):
-        def DFS(node, region_info):
-            '''
-            Depth_First_Search to get all the region_info (id, vertexes, center)
-            '''
-            region_info.append((node.id, node.vertex, node.center,))
-            
-            if not node.isLeaf:
-                for child in node.children:
-                    DFS(child, region_info)
-        
-        region_info = []
-        for room in self.rooms:
-            if room is None:
-                continue
-            DFS(room, region_info)
-        
-        plt.figure(dpi=300)
-        for id, vertex, center in region_info:
-            color = [random.uniform(0, 1, ) for _ in range(3)]
-            x, y = list(zip(*vertex))
-            plt.fill(x, y, color=color, alpha=0.1)
-            plt.text(*center, str(id), fontsize=3, ha='center', va='center', )
-        plt.show()
-    
-    def construct_tree(self, ):
-        '''
-        based on the adjacency and coordinates of nodes in the map, construct a graph with networkx and return it.
-        :return: a networkx graph
-        '''
-        from treelib import Tree
-        def DFS(node, region_info):
-            '''
-            Depth_First_Search to get all the region_info (id, vertexes, center)
-            '''
-            region_info.append((node.parent.id, node.parent.center, node.id, node.center,))
-            
-            if not node.isLeaf:
-                for child in node.children:
-                    DFS(child, region_info)
-        
-        region_info = []
-        for room in self.rooms:
-            if room is None:
-                continue
-            DFS(room, region_info)
-        region_info = np.array(region_info, dtype=object)
-        
-        T = Tree(identifier=0)
-        T.create_node(identifier=0, )
-        for parent, _, child, _ in region_info:
-            T.create_node(identifier=child, parent=parent, )
-        
-        # G = nx.DiGraph()
-        # nodes = {*region_info[:, 0], *region_info[:, 2]}
-        # G.add_nodes_from(nodes)  # 节点索引 (id) 集合
-        # edges = [(i, j, 10) for i, ic, j, jc in region_info]
-        # G.add_weighted_edges_from(edges)
-        #
-        # return G
-        
-        return T
-    
-    def show_tree(self, ):
-        tree = self.construct_tree()
-        # fig, ax = plt.subplots()
-        # nx.draw(tree, ax=ax, with_labels=True, )
-        # plt.show()
-        tree.show()
-    
-    def show(self, ):
-        self.show_map()
-        # self.show_rooms()
-        self.show_tree()
-
-
-class Map_graph(object):
-    '''
-    Map for 4F_CYC
-    '''
-    
-    def __init__(self, ds_path, ):
-        '''
-        
-        :param ds_path:
-        '''
-        super(Map_graph, self).__init__()
+        self.house = House(centers=centers, vertexes=vertexes)
+        self.map_graph = self.house.graph
+        self.dataset_graph = Dataset_Graph(ds_path=ds_path, map_graph=self.house.graph, centers=centers)
+        self.data_graph = self.dataset_graph.graph
         self.ds_path = ds_path
-        centers = [[None, None],  # 0
-                   [60, 425],  # 1
-                   [160, 320],  # 2
-                   [340, 425],  # 3
-                   [530, 320],  # 4
-                   # [215, 220],  # 5
-                   [None, None],  # 5
-                   [170, 160],  # 6
-                   [220, 100],  # 7
-                   [280, 160],  # 8
-                   [220, 15],  # 9
-                   [460, 15],  # 10
-                   # [420, 220],  # 11
-                   [None, None],  # 11
-                   [160, 425],  # 12
-                   [530, 425],  # 13
-                   [280, 220],  # 14
-                   [280, 100],  # 15
-                   [280, 15],  # 16
-                   [160, 220],  # 17
-                   [530, 220],  # 18
-                   [170, 100],  # 19
-                   [550, 15],  # 20
-                   ]
-        self.num_node = len(centers)
-        self.coordinates = np.array(centers)
-        map_adj = np.load('./adjacency_list.npz')['adjacency_list']
-        self.map_adj = np.array(map_adj)  # [nodes, nodes]: store the distance between each pair of map nodes
-        
-        self.nodes = np.array([Region() for _ in range(self.num_node)])
-        self.__init_nodes__()  # initialize every node in the graph (set_id, set_coordinate, set_neighbors)
-        self.print_map_nodes()
-        
-        self.ds_info = self.get_src_wk_info()  # store src and wk info
-        self.map_graph = self.construct_map_graph()  # a graph of map nodes to represent direct distance
-        self.data_adj_ls = self.cal_data_adjacency_list()  # [src_nodes, wk_nodes]: store if wk_data exists for a src
-        self.data_graph = self.construct_data_graph()  # a graph of map nodes to represent if data exists
-        self.src_ids = np.where(np.any(self.data_adj_ls, axis=-1))[0]
-        print('Number of src_ids: ', len(self.src_ids), '\n', 'src_ids: ', self.src_ids)
-    
-    def __init_nodes__(self, ):
-        '''
-        initialize every node in the graph (set_id, set_coordinate, set_neighbors, )
-        :return:
-        '''
-        node_idx = np.arange(self.num_node)
-        for i, adj_ls in enumerate(self.map_adj):
-            if np.all(adj_ls == np.inf):
-                self.nodes[i] = None
-            else:
-                neighbors = np.full((8,), None)
-                neighbors[np.array(adj_ls[adj_ls != np.inf], dtype=int)] = node_idx[adj_ls != np.inf]
-                # neighbors[np.array(adj_ls[adj_ls != np.inf], dtype=int)] = self.nodes[adj_ls != np.inf]
-                self.nodes[i].set_neighbors(neighbors)
-                self.nodes[i].set_coordinate(self.coordinates[i])
-                self.nodes[i].set_id(i)
-    
-    def get_src_wk_info(self, ):
-        '''
-        store src and wk info to a dict
-        :return:
-        '''
-        # get src and walker info
-        ds_info = dict()
-        src_paths = utils.get_subdirs_by_prefix(root=self.ds_path, prefix='src_')
-        wk_paths = [utils.get_subdirs_by_prefix(root=i, prefix='walker_') for i in src_paths]
-        for src, wk in zip(src_paths, wk_paths):
-            ds_info[os.path.basename(src)] = [os.path.basename(i) for i in wk]
-        
-        return ds_info
-    
-    def construct_map_graph(self, ):
-        '''
-        based on the adjacency and coordinates of nodes in the map, construct a graph with networkx and return it.
-        :return: a networkx graph
-        '''
-        map_adj = np.array(self.map_adj)
-        row, col = np.array(np.where(map_adj != np.inf))
-        
-        G = nx.Graph()
-        for i in {*row, *col}:  # 节点索引 (id) 集合
-            G.add_node(i)
-        for i, j in zip(row, col):
-            distance = np.linalg.norm(self.coordinates[i] - self.coordinates[j], ord=2)
-            G.add_weighted_edges_from([(i, j, distance)])
-        
-        return G
-    
-    def cal_data_adjacency_list(self, ):
-        '''
-        generate a 2D array ([src_nodes, wk_nodes]) to represent if wk_data exists for a src.
-        :return:
-        '''
-        # cal_data_adjacency_list
-        data_adj_ls = np.full((self.num_node, self.num_node), False)
-        for src_key in self.ds_info.keys():
-            src_coord = list(map(int, src_key.split('_')[1:3]))
-            src_idx = np.where(np.all(self.coordinates == [src_coord], axis=-1))[0][0]
-            for wk_key in self.ds_info[src_key]:
-                wk_coord = list(map(int, wk_key.split('_')[1:3]))
-                wk_coord = [wk_coord[0], wk_coord[-1]]
-                wk_idx = np.where(np.all(self.coordinates == [wk_coord], axis=-1))[0][0]
-                data_adj_ls[src_idx][wk_idx] = True
-                # path = self.find_shortest_map_path(src_id=src_idx, wk_id=wk_idx)
-                # for i in path:  # TODO: put every node in the path to data_adj_ls???
-                #     self.data_adj_ls[src_idx][i] = True
-        data_adj_ls[np.diag_indices_from(data_adj_ls)] = False
-        
-        print('-' * 20, 'Data graph', '-' * 20, )
-        for src_id, adj_ls in enumerate(data_adj_ls):
-            wk_ids = np.where(adj_ls)[0]
-            if len(wk_ids) > 0:
-                print('src:', src_id, '-' * 4, 'wk:', np.where(adj_ls)[0])
-        print('-' * 20, 'Finish printing graph', '-' * 20, )
-        
-        return data_adj_ls
-    
-    def construct_data_graph(self, ):  # src -> wk
-        '''
-        construct a graph with networkx to represent the distance from src_node to walker_node
-        :return:
-        '''
-        row, col = np.asarray(np.where(self.data_adj_ls))
-        
-        G = nx.DiGraph()
-        for i in {*row, *col}:
-            G.add_node(i)
-        for i, j in list(zip(row, col)):
-            distance = nx.dijkstra_path_length(self.map_graph, source=i, target=j)
-            G.add_weighted_edges_from([(i, j, distance)])
-        
-        return G
-    
-    def print_map_nodes(self, ):
-        '''
-        print the info of every node
-        :return:
-        '''
-        print('-' * 20, 'Graph of nodes', '-' * 20, )
-        for i, node in enumerate(self.nodes):
-            if node is None:
-                continue
-            print('id: ', node.id)
-            print('directions: ', list(range(8)))
-            # ids = []
-            # for j, neighbor in enumerate(node.neighbors):
-            #     if neighbor is not None:
-            #         ids.append(neighbor.id)
-            #     else:
-            #         ids.append('')
-            # print('neighbors: ', ids)
-            print('neighbors:  ', node.neighbors)
-        print('-' * 20, 'Finish printing graph', '-' * 20, )
     
     def find_shortest_map_path(self, src_id, wk_id, ):
         '''
@@ -608,19 +707,6 @@ class Map_graph(object):
 
 
 if __name__ == '__main__':
-    # adjacency_list = np.full((21, 21), np.inf)
-    # for i in range(21):
-    #     for j in range(21):
-    #         ipt = input('{:.1f}相对于{:.1f}的位置关系：'.format(j, i))
-    #         try:
-    #             ipt = int(ipt)
-    #             print(ipt)
-    #             adjacency_list[i][j] = ipt
-    #         except:
-    #             pass
-    # np.savez('./adjacency_list.npz', adjacency_list=adjacency_list)
-    # print(adjacency_list)
-    
     print('Hello World!')
     # import matplotlib.pyplot as plt
     #
@@ -636,7 +722,9 @@ if __name__ == '__main__':
     # node = Region(vertex=vertex)
     # node.show()
     
-    root = House()
-    root.show()
+    ds_path = '../../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
     
+    root = House()
+    # root.show()
+    data = Dataset_Graph(ds_path=ds_path, map_graph=root.graph, centers=root.centers)
     print('Brand-new World!')
