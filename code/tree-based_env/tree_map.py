@@ -27,19 +27,19 @@ global_ID = 20  # leave the previous IDs for Rooms
 MIN_LINE_LENGTH = 40
 
 
-class Region(object):
+class Area(object):
     def __init__(self, vertex, center=None, parent=None, id=None):
-        super(Region, self).__init__()
+        super().__init__()
         
         self.id = self.__set_id__() if id is None else id
         # print(self.id)
         
         self.vertex = np.array(vertex)
         # print(self.vertex)
-        self.line_centers = [Region.calculate_line_center(self.vertex[i], self.vertex[(i + 1) % 4]) for i in range(4)]
-        self.center = Region.calculate_lines_cross_point([self.line_centers[0], self.line_centers[2]],
-                                                         [self.line_centers[1], self.line_centers[3]],
-                                                         exist_parallel=True, )
+        self.line_centers = [Area.calculate_line_center(self.vertex[i], self.vertex[(i + 1) % 4]) for i in range(4)]
+        self.center = Area.calculate_lines_cross_point([self.line_centers[0], self.line_centers[2]],
+                                                       [self.line_centers[1], self.line_centers[3]],
+                                                       exist_parallel=True, )
         # This center point is not the midpoint of the two diagonals of the quadrilateral,
         # but the intersection of the midpoints of the two pairs of opposite sides.
         self.parent = parent
@@ -50,7 +50,7 @@ class Region(object):
     
     def __generate_children__(self, ):
         line1, line2 = self.vertex[:2], self.vertex[1:3]
-        length1, length2 = Region.calculate_line_length(*line1, ), Region.calculate_line_length(*line2, )
+        length1, length2 = Area.calculate_line_length(*line1, ), Area.calculate_line_length(*line2, )
         
         if length1 > MIN_LINE_LENGTH and length2 > MIN_LINE_LENGTH:
             vertex0 = [self.center, self.line_centers[3], self.vertex[0], self.line_centers[0]]
@@ -58,20 +58,20 @@ class Region(object):
             vertex2 = [self.center, self.line_centers[1], self.vertex[2], self.line_centers[2]]
             vertex3 = [self.center, self.line_centers[2], self.vertex[3], self.line_centers[3]]
             
-            return [Region(vertex0, parent=self), Region(vertex1, parent=self),
-                    Region(vertex2, parent=self), Region(vertex3, parent=self), ]
+            return [Area(vertex0, parent=self), Area(vertex1, parent=self),
+                    Area(vertex2, parent=self), Area(vertex3, parent=self), ]
         
         elif length1 > MIN_LINE_LENGTH and length2 <= MIN_LINE_LENGTH:
             vertex0 = [self.line_centers[0], self.line_centers[2], self.vertex[3], self.vertex[0], ]
             vertex1 = [self.line_centers[2], self.line_centers[0], self.vertex[1], self.vertex[2], ]
             
-            return [Region(vertex0, parent=self), Region(vertex1, parent=self), ]
+            return [Area(vertex0, parent=self), Area(vertex1, parent=self), ]
         
         elif length1 <= MIN_LINE_LENGTH and length2 > MIN_LINE_LENGTH:
             vertex0 = [self.line_centers[1], self.line_centers[3], self.vertex[0], self.vertex[1], ]
             vertex1 = [self.line_centers[3], self.line_centers[1], self.vertex[2], self.vertex[3], ]
             
-            return [Region(vertex0, parent=self), Region(vertex1, parent=self), ]
+            return [Area(vertex0, parent=self), Area(vertex1, parent=self), ]
         
         else:
             return None
@@ -106,8 +106,8 @@ class Region(object):
         :param exist_parallel: False: Force to return the intersection point at infinity
         :return:
         '''
-        a1, b1, c1 = Region.calculate_general_line_form(*line1)
-        a2, b2, c2 = Region.calculate_general_line_form(*line2)
+        a1, b1, c1 = Area.calculate_general_line_form(*line1)
+        a2, b2, c2 = Area.calculate_general_line_form(*line2)
         D = a1 * b2 - a2 * b1
         if abs(D) < EPS:
             if exist_parallel:
@@ -135,20 +135,20 @@ class Region(object):
         return self.center
     
     def show(self, ):
-        def DFS(node, region_info):
+        def DFS(node, area_info):
             '''
-            Depth_First_Search to get all the region_info (id, vertexes, center)
+            Depth_First_Search to get all the area_info (id, vertexes, center)
             '''
-            region_info.append((node.id, node.vertex, node.center,))
+            area_info.append((node.id, node.vertex, node.center,))
             
             if not node.isLeaf:
                 for child in node.children:
-                    DFS(child, region_info)
+                    DFS(child, area_info)
         
-        region_info = []
-        DFS(self, region_info)
+        area_info = []
+        DFS(self, area_info)
         
-        for id, vertex, center in region_info:
+        for id, vertex, center in area_info:
             color = [random.uniform(0, 1, ) for _ in range(3)]
             x, y = list(zip(*vertex))
             plt.fill(x, y, color=color, alpha=0.1)
@@ -158,7 +158,7 @@ class Region(object):
 
 class House(object):
     def __init__(self, centers=None, vertexes=None, ):
-        super(House, self).__init__()
+        super().__init__()
         self.id = 0
         self.center = (270, 225)
         centers = [None,  # 0
@@ -215,8 +215,8 @@ class House(object):
         # self.print_house_info()
         
         self.graph = self.construct_graph()  # a graph of map nodes to represent direct distance
-        
         self.set_neighbors()
+        self.areas = self.collect_areas()
     
     def __create_rooms__(self, vertexes, centers=None, parent=None):
         rooms = []
@@ -225,39 +225,42 @@ class House(object):
             if vertex is None:
                 rooms.append(None)
             else:
-                rooms.append(Region(vertex=vertex, center=center, parent=parent, id=idx))
+                rooms.append(Area(vertex=vertex, center=center, parent=parent, id=idx))
         
         return rooms
     
     def get_nodes(self):
-        def DFS(node, node_ls):
-            ''' Depth_First_Search to get all the nodes in the map '''
-            node_ls.append(node)
-            if not node.isLeaf:
-                for child in node.children:
-                    DFS(child, node_ls)
+        def condition(**kwargs):
+            return True
         
         node_ls = []
         for room in self.rooms:
             if room is not None:
-                DFS(room, node_ls)
+                self.DFS(room, node_ls, condition)
         
         return node_ls
     
-    def get_leaves(self, ):
-        def DFS(node, leaf_ls):
-            ''' Depth_First_Search to get all the leaves '''
-            
-            if node.isLeaf:
-                leaf_ls.append(node)
-            else:
-                for child in node.children:
-                    DFS(child, leaf_ls)
+    def DFS(self, root, node_ls, condition: callable = None):
+        ''' Depth_First_Search to get all the leaves '''
         
+        if condition is None or condition(node=root):
+            node_ls.append(root)
+        if not root.isLeaf:
+            for child in root.children:
+                self.DFS(child, node_ls, condition)
+    
+    def get_leaves(self, ):
         leaf_ls = []
         for room in self.rooms:
             if room is not None:
-                DFS(room, leaf_ls)
+                leaf_ls.extend(self.get_room_leaves(room=room))
+        return leaf_ls
+    
+    def get_room_leaves(self, room):
+        condition = lambda node: node.isLeaf
+        
+        leaf_ls = []
+        self.DFS(room, leaf_ls, condition)
         
         return leaf_ls
     
@@ -291,7 +294,7 @@ class House(object):
         G = nx.Graph()
         nodes = {*row, *col}
         G.add_nodes_from(nodes)  # 节点索引 (id) 集合
-        edges = [(i, j, Region.calculate_line_length(self.centers[i], self.centers[j])) for i, j in zip(row, col)]
+        edges = [(i, j, Area.calculate_line_length(self.centers[i], self.centers[j])) for i, j in zip(row, col)]
         G.add_weighted_edges_from(edges)
         
         return G
@@ -302,32 +305,32 @@ class House(object):
         :return: a networkx graph
         '''
         from treelib import Tree
-        def DFS(node, region_info):
+        def DFS(node, area_info):
             '''
-            Depth_First_Search to get all the region_info (id, vertexes, center)
+            Depth_First_Search to get all the area_info (id, vertexes, center)
             '''
-            region_info.append((node.parent.id, node.parent.center, node.id, node.center,))
+            area_info.append((node.parent.id, node.parent.center, node.id, node.center,))
             
             if not node.isLeaf:
                 for child in node.children:
-                    DFS(child, region_info)
+                    DFS(child, area_info)
         
-        region_info = []
+        area_info = []
         for room in self.rooms:
             if room is None:
                 continue
-            DFS(room, region_info)
-        region_info = np.array(region_info, dtype=object)
+            DFS(room, area_info)
+        area_info = np.array(area_info, dtype=object)
         
         T = Tree(identifier=0)
         T.create_node(identifier=0, )
-        for parent, _, child, _ in region_info:
+        for parent, _, child, _ in area_info:
             T.create_node(identifier=child, parent=parent, )
         
         # G = nx.DiGraph()
-        # nodes = {*region_info[:, 0], *region_info[:, 2]}
+        # nodes = {*area_info[:, 0], *area_info[:, 2]}
         # G.add_nodes_from(nodes)  # 节点索引 (id) 集合
-        # edges = [(i, j, 10) for i, ic, j, jc in region_info]
+        # edges = [(i, j, 10) for i, ic, j, jc in area_info]
         # G.add_weighted_edges_from(edges)
         #
         # return G
@@ -343,10 +346,10 @@ class House(object):
     
     def show_rooms(self, ):
         nodes = self.get_nodes()
-        region_info = [(node.id, node.vertex, node.center,) for node in nodes]
+        area_info = [(node.id, node.vertex, node.center,) for node in nodes]
         
         plt.figure(dpi=300)
-        for id, vertex, center in region_info:
+        for id, vertex, center in area_info:
             color = [random.uniform(0, 1, ) for _ in range(3)]
             x, y = list(zip(*vertex))
             plt.fill(x, y, color=color, alpha=0.1)
@@ -424,8 +427,8 @@ class House(object):
         for id, vertex, _ in leaf_info:
             vertex = np.rint(vertex).astype(int)
             cv2.fillConvexPoly(leaf_img, vertex, id)
-        plt.imshow(leaf_img)
-        plt.show()
+        # plt.imshow(leaf_img)
+        # plt.show()
         
         # print('set neighbors...')
         neighbors_ls = []
@@ -464,6 +467,51 @@ class House(object):
                 else:
                     neighbor_ids.append(neighbor.id)
             print(leaf.id, '\n', list(range(8)), '\n', neighbor_ids)
+    
+    def find_room(self, area=None, id=None, ):
+        '''
+        area enjoys a higher priority than id.
+        '''
+        area = area if area is not None else self.get_area_by_id(id)
+        assert isinstance(area, Area)
+        
+        inter_area = area
+        while inter_area.parent is not self:
+            inter_area = inter_area.parent
+        
+        return inter_area
+    
+    def collect_areas(self, ):
+        nodes = self.get_nodes()
+        
+        id_max = max([node.id for node in nodes])
+        area_ls = [None] * (id_max + 1)
+        for node in nodes:
+            area_ls[node.id] = node
+        area_ls[self.id] = self
+        
+        return area_ls
+    
+    def get_area_by_id(self, id):
+        return self.areas[id]
+    
+    def inSameRoom(self, id1, id2):
+        room_id_1 = self.find_room(id=id1).id
+        room_id_2 = self.find_room(id=id2).id
+        
+        return room_id_1 == room_id_2
+    
+    def random_area(self, ):
+        '''
+        return a random id in the map.
+        :return:
+        '''
+        # There are two ways to get a random area:
+        # 1. randomly choose one area from all the leaves;
+        # 2. randomly choose one room first before choosing one leaf from its leaves.
+        room = random.choice(self.rooms)
+        leaves = self.get_room_leaves(room=room)
+        return random.choice(leaves)
 
 
 class Dataset_Graph(object):
@@ -565,55 +613,55 @@ class Map_graph(object):
     
     def __init__(self, ds_path, ):
         super().__init__()
-        centers = [None,  # 0
-                   [60, 425],  # 1
-                   [160, 320],  # 2
-                   [340, 425],  # 3
-                   [530, 320],  # 4
-                   None,  # 5 [215, 220]
-                   None,  # 6 [170, 160]
-                   None,  # 7 [220, 100]
-                   [280, 160],  # 8
-                   [220, 15],  # 9
-                   [460, 15],  # 10
-                   None,  # 11 [420, 220]
-                   [160, 425],  # 12
-                   [530, 425],  # 13
-                   [280, 220],  # 14
-                   None,  # 15 [280, 100]
-                   [280, 15],  # 16
-                   [160, 220],  # 17
-                   [530, 220],  # 18
-                   None,  # 19 [170, 100]
-                   [550, 15],  # 20
-                   ]
-        vertexes = [None,  # 0
-                    [(4, 450), (145, 450), (145, 418), (4, 418)],  # 1
-                    [(145, 418), (175, 418), (175, 250), (145, 250)],  # 2
-                    [(175, 450), (515, 450), (515, 418), (175, 418)],  # 3
-                    [(515, 418), (545, 418), (545, 250), (515, 250)],  # 4
-                    None,  # 5
-                    None,  # 6
-                    None,  # 7
-                    [(250, 210), (317, 210), (317, 42), (250, 42)],  # 8
-                    [(180, 42), (250, 42), (250, 12), (180, 12)],  # 9
-                    [(317, 42), (500, 42), (500, 12), (317, 12)],  # 10
-                    None,  # 11
-                    [(145, 450), (175, 450), (175, 418), (145, 418)],  # 12
-                    [(515, 450), (545, 450), (545, 418), (515, 418)],  # 13
-                    [(250, 250), (317, 250), (317, 210), (250, 210)],  # 14
-                    None,  # 15
-                    [(250, 42), (317, 42), (317, 12), (250, 12)],  # 16
-                    [(145, 250), (175, 250), (175, 210), (145, 210)],  # 17
-                    [(515, 250), (545, 250), (545, 210), (515, 210)],  # 18
-                    None,  # 19
-                    [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
-                    ]
-        self.house = House(centers=centers, vertexes=vertexes)
-        self.map_graph = self.house.graph
-        self.dataset_graph = Dataset_Graph(ds_path=ds_path, map_graph=self.house.graph, centers=centers)
-        self.data_graph = self.dataset_graph.graph
         self.ds_path = ds_path
+        self.centers = [None,  # 0
+                        [60, 425],  # 1
+                        [160, 320],  # 2
+                        [340, 425],  # 3
+                        [530, 320],  # 4
+                        None,  # 5 [215, 220]
+                        None,  # 6 [170, 160]
+                        None,  # 7 [220, 100]
+                        [280, 160],  # 8
+                        [220, 15],  # 9
+                        [460, 15],  # 10
+                        None,  # 11 [420, 220]
+                        [160, 425],  # 12
+                        [530, 425],  # 13
+                        [280, 220],  # 14
+                        None,  # 15 [280, 100]
+                        [280, 15],  # 16
+                        [160, 220],  # 17
+                        [530, 220],  # 18
+                        None,  # 19 [170, 100]
+                        [550, 15],  # 20
+                        ]
+        self.vertexes = [None,  # 0
+                         [(4, 450), (145, 450), (145, 418), (4, 418)],  # 1
+                         [(145, 418), (175, 418), (175, 250), (145, 250)],  # 2
+                         [(175, 450), (515, 450), (515, 418), (175, 418)],  # 3
+                         [(515, 418), (545, 418), (545, 250), (515, 250)],  # 4
+                         None,  # 5
+                         None,  # 6
+                         None,  # 7
+                         [(250, 210), (317, 210), (317, 42), (250, 42)],  # 8
+                         [(180, 42), (250, 42), (250, 12), (180, 12)],  # 9
+                         [(317, 42), (500, 42), (500, 12), (317, 12)],  # 10
+                         None,  # 11
+                         [(145, 450), (175, 450), (175, 418), (145, 418)],  # 12
+                         [(515, 450), (545, 450), (545, 418), (515, 418)],  # 13
+                         [(250, 250), (317, 250), (317, 210), (250, 210)],  # 14
+                         None,  # 15
+                         [(250, 42), (317, 42), (317, 12), (250, 12)],  # 16
+                         [(145, 250), (175, 250), (175, 210), (145, 210)],  # 17
+                         [(515, 250), (545, 250), (545, 210), (515, 210)],  # 18
+                         None,  # 19
+                         [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
+                         ]
+        self.house = House(centers=self.centers, vertexes=self.vertexes)
+        self.map_graph = self.house.graph
+        self.dataset_graph = Dataset_Graph(ds_path=self.ds_path, map_graph=self.map_graph, centers=self.centers)
+        self.data_graph = self.dataset_graph.graph
     
     def find_shortest_map_path(self, src_id, wk_id, ):
         '''
@@ -623,18 +671,16 @@ class Map_graph(object):
         :param wk_id:
         :return:
         '''
-        path = nx.dijkstra_path(self.map_graph, source=src_id, target=wk_id)
+        src_room_id, wk_room_id = self.find_room(id=src_id).id, self.find_room(id=wk_id).id
+        path = nx.dijkstra_path(self.map_graph, source=src_room_id, target=wk_room_id)
         # distance = nx.dijkstra_path_length(self.map_graph, source=src_id, target=wk_id)
         return path
     
     def find_shortest_data_path(self, src_id, wk_id, ):
-        '''
-        return the shortest data path from the src_id to the wk_id
-        :param src_id:
-        :param wk_id:
-        :return:
-        '''
-        path = nx.dijkstra_path(self.data_graph, source=src_id, target=wk_id)
+        ''' return the shortest data path from the src_id to the wk_id '''
+        src_room_id, wk_room_id = self.find_room(id=src_id).id, self.find_room(id=wk_id).id
+        
+        path = nx.dijkstra_path(self.data_graph, source=src_room_id, target=wk_room_id)
         # distance = nx.dijkstra_path_length(self.data_graph, source=src_id, target=wk_id)
         return path
     
@@ -654,9 +700,10 @@ class Map_graph(object):
         :param wk_id:
         :return:
         '''
-        path = self.find_shortest_map_path(src_id, wk_id, )
-        wk_neighbors = self.nodes[wk_id].get_neighbor()
-        return np.where(wk_neighbors == path[-2])[0][0]
+        src_room_id, wk_room_id = self.find_room(id=src_id).id, self.find_room(id=wk_id).id
+        path = self.find_shortest_map_path(src_id=src_room_id, wk_id=wk_room_id, )
+        
+        return self.house.adjacency[wk_room_id, path[-2]]
     
     def is_data_neighbor(self, src_id, wk_id, ):
         '''
@@ -677,33 +724,31 @@ class Map_graph(object):
         path = self.find_shortest_data_path(src_id, wk_id)
         return path[1:-1]
     
-    def get_coordinate(self, id, ):
-        '''
-        get the coordinates of a node.
-        :param id:
-        :return:
-        '''
-        return self.nodes[id].get_coordinate()
+    def get_center(self, id, ):
+        ''' get the center coordinates of a area. '''
+        return self.house.areas[id].center
     
-    def random_id(self, src_id=None, ):
-        '''
-        if src_id is None: return an id randomly.
-        else: return one walker_id from src_id's data_children randomly
-        :param src_id:
-        :return:
-        '''
-        if src_id is None:
-            return np.random.choice(self.src_ids, 1)[0]
-        else:
-            children = np.where(self.data_adj_ls[src_id], )[0]
-            return np.random.choice(children, 1)[0]
+    def get_room_center(self, id, ):
+        ''' get the center coordinates of a room where the area of id is located. '''
+        room = self.find_room(id=id)
+        return self.get_center(id=room.id)
+    
+    def random_id(self, ):
+        ''' return a random id in the map. And the selection method is defined in House class. '''
+        return self.house.random_area().id
     
     def random_doa(self, ):
-        '''
-        return a doa randomly.
-        :return:
-        '''
-        return np.random.choice(np.arange(8), 1)[0]
+        ''' return a doa randomly. '''
+        return random.choice(list(range(8)))
+    
+    def inSameRoom(self, id1, id2):
+        return self.house.inSameRoom(id1, id2)
+    
+    def find_room(self, area=None, id=None, ):
+        return self.house.find_room(area=area, id=id)
+    
+    def get_area_by_id(self, id):
+        return self.house.get_area_by_id(id=id)
 
 
 if __name__ == '__main__':
@@ -719,12 +764,16 @@ if __name__ == '__main__':
     # plt.show()
     
     # vertex = [(0, 0), (0, 100), (100, 100), (100, 0)]
-    # node = Region(vertex=vertex)
+    # node = Area(vertex=vertex)
     # node.show()
     
     ds_path = '../../dataset/4F_CYC/1s_0.5_800_16000/ini_hann_norm_denoise_drop_stft_seglen_64ms_stepsize_ratio_0.5'
     
-    root = House()
+    # root = House()
     # root.show()
-    data = Dataset_Graph(ds_path=ds_path, map_graph=root.graph, centers=root.centers)
+    # data = Dataset_Graph(ds_path=ds_path, map_graph=root.graph, centers=root.centers)
+    
+    map_graph = Map_graph(ds_path=ds_path)
+    map_graph.house.show()
+    
     print('Brand-new World!')
