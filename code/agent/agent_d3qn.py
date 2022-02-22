@@ -14,9 +14,10 @@ import random
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-from model_tf.PER import Memory
-from agent_models import D3QN_Classifier, FeatureExtractor
+from .model_tf.PER import Memory
+from .agent_models import D3QN_Classifier, FeatureExtractor
 from collections import deque
+from scipy.special import softmax
 
 
 class DQNAgent(object):
@@ -128,25 +129,31 @@ class DQNAgent(object):
                 target_model_theta[idx] = target_weight
             self.target_model.set_weights(target_model_theta)
     
-    def remember(self, state, action, reward, state_, done, ):
+    def remember(self, state, action, reward, state_, done, useMask=False):
         '''
         save the experience to memory buffer.
         '''
+        if useMask:
+            (state, mask), (state_, mask_) = state, state_
         if state_ is not None:
             state_ = self.feature_extractor.predict(np.array([state_]))[0]
         
-        for i in range(4):
-            state = np.roll(state, shift=2, axis=-1)
-            action = (action + 8 - 2) % 8
-            # extract feature to remember
-            feature_state = self.feature_extractor.predict(np.array([state]))[0]
+        # for i in range(4):
+        #     state = np.roll(state, shift=2, axis=-1)
+        #     action = (action + 8 - 2) % 8
+        # extract feature to remember
+        feature_state = self.feature_extractor.predict(np.array([state]))[0]
+        if useMask:
+            experience = (feature_state, mask), action, reward, (state_, mask_), done
+        else:
             experience = feature_state, action, reward, state_, done
-            if self.usePER:
-                self.MEMORY.append(experience)
-            else:
-                self.memory.append(experience)
+        
+        if self.usePER:
+            self.MEMORY.append(experience)
+        else:
+            self.memory.append(experience)
     
-    def remember_batch(self, batch_experience, useDiscount=True):
+    def remember_batch(self, batch_experience, useDiscount=True, useMask=False):
         '''
         save a batch of experience to memory buffer.
         if discount: apply discount to the reward.
@@ -155,12 +162,12 @@ class DQNAgent(object):
             for i in range(len(batch_experience) - 2, -1, -1):
                 batch_experience[i][2] += self.discount_rate * batch_experience[i + 1][2]
         for experience in batch_experience:
-            self.remember(*experience)
+            self.remember(*experience, useMask=useMask)
     
-    def learn_sample(self, state, action, reward, state_, done, ):
-        self.learn_per_batch([state], [action], [reward], [state_], [done], )
+    def learn_sample(self, state, action, reward, state_, done, useMask=False):
+        self.learn_per_batch([state], [action], [reward], [state_], [done], useMask=useMask)
     
-    def learn_per_batch(self, state, action, reward, state_, done, ):
+    def learn_per_batch(self, state, action, reward, state_, done, useMask=False):
         '''
         optimize the model for one batch
         :param state:
@@ -170,6 +177,9 @@ class DQNAgent(object):
         :param done:
         :return:
         '''
+        if useMask:
+            (state, mask), (state_, mask_) = list(zip(*state)), list(zip(*state_))
+            mask, mask_ = np.array(mask), np.array(mask_)
         state = np.array(state)
         action = np.array(action, dtype=np.int32)
         reward = np.array(reward, dtype=np.float32)
@@ -177,10 +187,14 @@ class DQNAgent(object):
         done = np.array(done, dtype=np.bool)
         
         target = self.model.predict(state)  # predict Q for starting state with the main network
-        target_old = np.array(target)
         target_next = self.model.predict(state_)  # predict best action in ending state with the main network
+        target = target * mask if useMask else target
+        target_next = target_next * mask_ if useMask else target_next
+        target_old = np.array(target)
+        
         if self.ddqn:
             target_value = self.target_model.predict(state_)  # predict Q for ending state with the target network
+            target_value = target_value * mask_ if useMask else target_value
         
         for i in range(len(done)):
             # correction on the Q value for the action used
@@ -189,8 +203,8 @@ class DQNAgent(object):
             else:
                 if self.ddqn:  # Double - DQN
                     a = np.argmax(target_next[i])  # current Q Network selects the action
-                    target[i][action[i]] = reward[i] + self.discount_rate * (
-                        target_value[i][a])  # target Q Network to evaluate
+                    target[i][action[i]] = reward[i] + \
+                                           self.discount_rate * (target_value[i][a])  # target Q Network to evaluate
                 else:  # Standard - DQN ---- DQN chooses the max Q value among next actions
                     target[i][action[i]] = reward[i] + self.discount_rate * (np.amax(target_next[i]))
         
@@ -198,7 +212,7 @@ class DQNAgent(object):
         
         return target_old, target
     
-    def replay(self, ):
+    def replay(self, useMask=False):
         '''
         experience replay and learn on a batch
         '''
@@ -207,22 +221,15 @@ class DQNAgent(object):
         else:
             minibatch = random.sample(self.memory, min(len(self.memory), self.batch_size))
         
-        # minibatch = np.array(minibatch, dtype=object)
-        # state, action, reward, next_state, done = minibatch.T
-        # state, next_state = np.concatenate(state), np.concatenate(next_state)
-        # action = np.asarray(action, dtype=np.int32)
-        # reward = np.asarray(reward, dtype=np.float64)
-        # done = np.asarray(done, dtype=np.bool)
-        # state, action, reward, state_, done = list(zip(*minibatch))
-        # for i, i_state_ in enumerate(state_):
-        #     if i_state_ is None:
-        #         state_[i] = state[i]
         state, action, reward, state_, done = [], [], [], [], []
         for i_state, i_action, i_reward, i_state_, i_done in minibatch:
             state.append(i_state), action.append(i_action), reward.append(i_reward), done.append(i_done)
-            state_.append(i_state_ if (i_state_ is not None) else i_state)
+            if useMask:
+                state_.append(i_state_ if (i_state_[0] is not None) else i_state)
+            else:
+                state_.append(i_state_ if (i_state_ is not None) else i_state)
         
-        target_old, target = self.learn_per_batch(state, action, reward, state_, done)
+        target_old, target = self.learn_per_batch(state, action, reward, state_, done, useMask=useMask)
         
         if self.usePER:
             indices = np.arange(self.batch_size, dtype=np.int32)
@@ -230,12 +237,12 @@ class DQNAgent(object):
             # Update priority
             self.MEMORY.batch_update(tree_idx, absolute_errors)
     
-    def learn(self, learnTimes=None):
+    def learn(self, learnTimes=None, useMask=False):
         learnTimes = self.learnTimes if learnTimes is None else learnTimes
         for _ in range(learnTimes):
-            self.replay()
+            self.replay(useMask=useMask)
     
-    def act(self, state, decay_step, ):
+    def act(self, state, decay_step, mask=None):
         '''
         return the action and explore_prob based on eps_decay
         :param state:
@@ -250,11 +257,13 @@ class DQNAgent(object):
             explore_prob = self.min_eps
         
         if explore_prob > random.random():  # Make a random action (exploration)
-            return random.randrange(self.num_action), explore_prob
+            return random.choices(range(self.num_action), weights=np.array(mask, dtype=float), k=1)[0], explore_prob
         else:  # Get action from Q-network (exploitation)
-            y_pred = self.predict(state)
+            y_pred = self.predict(state)[0]
+            y_prob = softmax(y_pred)
+            y_prob = y_prob * mask if mask is not None else y_prob
             # print('y_pred:', y_pred[0])
-            return np.argmax(y_pred[0]), explore_prob
+            return np.argmax(y_prob), explore_prob
     
     def predict(self, state, ):
         '''

@@ -37,7 +37,7 @@ def D3QN_Classifier(dueling=True, base_model_dir='../model/base_model/', loadTar
         if based_on_base_model:
             print('-' * 20, 'Based on base_model\'s classifier...', '-' * 20, )
             base_classifier = tf.keras.models.load_model(base_ckpt_dir)
-            conv, reshape = base_classifier.layers
+            # conv, reshape = base_classifier.layers
             # input = base_classifier.input
             # base_classifier = Model(inputs=input, outputs=reshape(conv(input)))
         

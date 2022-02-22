@@ -13,7 +13,7 @@ import random
 import warnings
 import numpy as np
 from copy import deepcopy
-from map import Map_graph
+from .map import Map_graph
 import pickle
 from lib import utils
 
@@ -118,7 +118,7 @@ class MAP_ENV(object):
             print('abs_doa:', abs_doa)
             print('rela_doa:', rela_doa)
             raise ValueError('src_walker data does not exist')
-        state_path = random.sample(state_path_ls, 1)[0]
+        state_path = random.choice(state_path_ls)
         state = self.load_preprocess_state(state_path=state_path)
         return state
     
@@ -141,7 +141,7 @@ class MAP_ENV(object):
             # id_ls = np.asarray(id_ls)
             # id_ls = id_ls[id_ls != None]
             if len(doa_node_pair) > 0:
-                next_abs_doa, next_id = random.sample(doa_node_pair, 1)[0]
+                next_abs_doa, next_id = random.choice(doa_node_pair)
                 break
         
         if next_id is None:

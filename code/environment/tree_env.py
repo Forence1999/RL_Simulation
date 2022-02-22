@@ -18,7 +18,7 @@ import random
 import warnings
 import numpy as np
 from copy import deepcopy
-from tree_map import Map_graph
+from .tree_map import Map_graph
 import pickle
 from lib import utils
 
@@ -43,15 +43,16 @@ class MAP_ENV(object):
         src_id = self.map.random_id()
         while True:
             wk_id = self.map.random_id()
-            if not self.map.inSameRoom(src_id, wk_id):
+            if not self.map.inSameRoom(id1=src_id, id2=wk_id):
                 break
         abs_doa = self.map.random_doa()
         state = self.get_state(src_id=src_id, wk_id=wk_id, abs_doa=abs_doa)
+        mask = self.get_mask(wk_id=wk_id, abs_doa=abs_doa)
         done = False
         
         self.src_id, self.wk_id, self.abs_doa, self.done = src_id, wk_id, abs_doa, done
         
-        return state, self.done
+        return (state, mask), self.done
     
     def get_src_doa(self, src_id, wk_id, abs_doa, ):  # Checked
         '''
@@ -94,11 +95,11 @@ class MAP_ENV(object):
         :param abs_doa: The direction which the walker is facing relative to the absolute coordinate system
         :return:
         '''
-        wk_coord = self.map.get_room_center(wk_id)
+        wk_coord = self.map.get_room_center(id=wk_id)
         wk_basename = '_'.join(['walker', ] + list(map(str, wk_coord)) + ['1', ])
         data_path = self.map.find_shortest_data_path(src_id=src_id, wk_id=wk_id, )
         sub_src_id = data_path[-2]
-        sub_src_coord = self.map.get_room_center(sub_src_id)
+        sub_src_coord = self.map.get_room_center(id=sub_src_id)
         sub_src_basename = '_'.join(['src', ] + list(map(str, sub_src_coord)))
         src_doa = self.get_src_doa(src_id=sub_src_id, wk_id=wk_id, abs_doa=abs_doa)
         # print('sub_src_key:', sub_src_key, 'wk_key:', wk_key)
@@ -119,15 +120,25 @@ class MAP_ENV(object):
         
         if state_path_ls is None:
             print('data_path:', data_path, )
-            print('src_id:', src_id, )
-            print('sub_src_id:', sub_src_id, 'sub_src_basename:', sub_src_basename, )
-            print('wk_id:', wk_id, 'wk_basename:', wk_basename, )
+            print('src_id:', src_id, 'room_id', self.map.find_room(id=src_id).id)
+            print('sub_src_id:', sub_src_id, 'room_id', self.map.find_room(id=sub_src_id).id,
+                  'sub_src_basename:', sub_src_basename)
+            print('wk_id:', wk_id, 'room_id', self.map.find_room(id=wk_id).id, 'wk_basename:', wk_basename)
             print('abs_doa:', abs_doa)
             print('src_doa:', src_doa)
             raise ValueError('src_walker data does not exist')
         state_path = random.choice(state_path_ls)
         state = self.load_preprocess_state(state_path=state_path)
+        
         return state
+    
+    def get_mask(self, wk_id, abs_doa, ):  # Checked
+        ''' A mask represents which directions the walker can choose. '''
+        crt_neighbors = self.map.get_neighbors(id=wk_id)
+        mask = [i is not None for i in crt_neighbors]
+        mask = np.roll(mask, shift=-abs_doa)
+        
+        return mask
     
     def next_pose(self, action, ):  # Checked
         '''
@@ -182,16 +193,18 @@ class MAP_ENV(object):
         #     reward -= 0.1
         
         reward = -0.05
-        if self.map.inSameRoom(self.src_id, self.wk_id):
+        if self.map.inSameRoom(id1=self.src_id, id2=self.wk_id):
             done = True
             reward += 1.
             state_ = None
+            mask_ = None
         else:
             done = False
             state_ = self.get_state(src_id=self.src_id, wk_id=self.wk_id, abs_doa=self.abs_doa)
-        
+            mask_ = self.get_mask(wk_id=self.wk_id, abs_doa=self.abs_doa)
         info = None
-        return state_, reward, done, info
+        
+        return (state_, mask_), reward, done, info
     
     def render(self, ):
         '''

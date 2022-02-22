@@ -10,8 +10,8 @@ import os
 import sys
 import time
 import numpy as np
-from agent_d3qn import DQNAgent
-from env import MAP_ENV
+from agent.agent_d3qn import DQNAgent
+from environment.tree_env import MAP_ENV
 from lib import utils
 
 
@@ -22,10 +22,11 @@ class RL_game():
                  num_update_episode=1, d3qn_model_dir=None, model_name=None, memory_size=1024, **kwargs):
         super(RL_game, self).__init__()
         self.AGENT_CLASS = 'D3QN'
+        self.useMask = True
         # self.agent_learn = True
         self.agent_learn = agent_learn
         self.print_interval = 10
-        self.max_episode_steps = 30  # 一个episode最多探索多少步，超过则强行终止。
+        self.max_episode_steps = 50  # 一个episode最多探索多少步，超过则强行终止。
         # self.num_update_episode = 10  # update target model and reward graph & data
         self.num_update_episode = num_update_episode  # update target model and reward graph & data
         self.num_save_episode = 100
@@ -96,7 +97,7 @@ class RL_game():
         lr = 'lr_' + str(self.lr)  # TODO
         time_stamp = time.strftime("%Y%m%d-%H%M%S")
         
-        name = '_'.join((dueling, dqn, softUpdate, eps_decay, usePER, lr, time_stamp)).replace('__', '_')
+        name = '_'.join((time_stamp, 'Tree', dueling, dqn, softUpdate, eps_decay, usePER, lr,)).replace('__', '_')
         print('-' * 20, 'Model Name:', name, '-' * 20, )
         
         return name
@@ -130,18 +131,21 @@ class RL_game():
         np.savez(data_path, data=reward)
     
     def play(self, ):
+        print('-' * 20, 'Start playing', '-' * 20, )
         total_step = 0
         episode_rewards = []
         for episode_idx in range(self.episodes):
             step_rewards = []
             experience_ls = []
-            state, done = self.env.reset()
+            state, done = self.env.reset()  # if useMask: state: (state, mask)
             num_step = 0
             exp_pro = None
             while not done:
                 num_step += 1
                 total_step += 1
-                action, exp_pro = self.agent.act(state, decay_step=total_step)
+                
+                action, exp_pro = self.agent.act(state[0], decay_step=total_step, mask=state[1]) if self.useMask \
+                    else self.agent.act(state[0], decay_step=total_step, )
                 state_, reward, done, info = self.env.step(action)
                 experience_ls.append([state, action, reward, state_, done])
                 state = state_
@@ -151,8 +155,8 @@ class RL_game():
                     break
             episode_rewards.append(np.sum(step_rewards))
             if self.agent_learn:
-                self.agent.remember_batch(batch_experience=experience_ls, useDiscount=True)
-                self.agent.learn()
+                self.agent.remember_batch(batch_experience=experience_ls, useDiscount=True, useMask=self.useMask)
+                self.agent.learn(useMask=self.useMask)
             
             print('episode:', episode_idx, '\t',
                   'done:', done, '\t',
@@ -222,7 +226,7 @@ if __name__ == '__main__':
     parser.add_argument('--d3qn_model_dir', type=str, default='../model/d3qn_model', help='')
     # parser.add_argument('--model_name', type=str, default='Dueling_DDQN_softUpdate__lr_0.0001_20220212-235802', help='')
     parser.add_argument('--load_d3qn_model', type=ast.literal_eval, default=False, help='')
-    parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=False, help='')
+    parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=True, help='')
     
     args = vars(parser.parse_args())
     print('RL config:', args)

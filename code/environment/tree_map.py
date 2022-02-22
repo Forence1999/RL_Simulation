@@ -43,6 +43,7 @@ class Area(object):
         # This center point is not the midpoint of the two diagonals of the quadrilateral,
         # but the intersection of the midpoints of the two pairs of opposite sides.
         self.parent = parent
+        self.neighbors = None
         self.children = self.__generate_children__()
         self.isLeaf = True if self.children is None else False
         self.num_children = 0 if self.isLeaf else len(self.children)
@@ -210,7 +211,8 @@ class House(object):
         self.num_room = len(self.centers) - sum(self.centers == None)
         self.rooms = self.__create_rooms__(vertexes=self.vertexes, centers=self.centers, parent=self)
         
-        adjacency = np.load('./adjacency_list.npz')['adjacency_list']
+        adj_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), './adjacency_list.npz')
+        adjacency = np.load(adj_path)['adjacency_list']
         self.adjacency = np.array(adjacency)  # num_room * num_room: [i, j]: the direction (map_adj[i, j]) of i is j
         # self.print_house_info()
         
@@ -227,7 +229,7 @@ class House(object):
             else:
                 rooms.append(Area(vertex=vertex, center=center, parent=parent, id=idx))
         
-        return rooms
+        return np.array(rooms, dtype=object)
     
     def get_nodes(self):
         def condition(**kwargs):
@@ -459,6 +461,7 @@ class House(object):
     
     def show_neighbors_of_leaves(self, ):
         leaves = self.get_leaves()
+        leaves.sort(key=lambda leaf: leaf.id)
         for leaf in leaves:
             neighbor_ids = []
             for neighbor in leaf.neighbors:
@@ -468,12 +471,12 @@ class House(object):
                     neighbor_ids.append(neighbor.id)
             print(leaf.id, '\n', list(range(8)), '\n', neighbor_ids)
     
-    def find_room(self, area=None, id=None, ):
+    def find_room(self, id=None, area=None, ):
         '''
         area enjoys a higher priority than id.
         '''
         area = area if area is not None else self.get_area_by_id(id)
-        assert isinstance(area, Area)
+        assert isinstance(area, Area), f'Area (id: {id}) or area itself is not an instance of Area.'
         
         inter_area = area
         while inter_area.parent is not self:
@@ -509,9 +512,19 @@ class House(object):
         # There are two ways to get a random area:
         # 1. randomly choose one area from all the leaves;
         # 2. randomly choose one room first before choosing one leaf from its leaves.
-        room = random.choice(self.rooms)
+        
+        # room = np.random.choice(self.rooms, p=np.array(self.rooms != None, dtype=float))
+        room = random.choices(self.rooms, weights=np.array(self.rooms != None, dtype=float), k=1)[0]
         leaves = self.get_room_leaves(room=room)
-        return random.choice(leaves)
+        leaf = random.choice(leaves)
+        # print('Room_id:', room.id, 'Leaf:', leaf.id)
+        
+        return leaf
+    
+    def get_neighbors(self, id):
+        ''' Get the neighbors of the area with id. '''
+        area = self.get_area_by_id(id=id)
+        return area.neighbors
 
 
 class Dataset_Graph(object):
@@ -703,7 +716,7 @@ class Map_graph(object):
         src_room_id, wk_room_id = self.find_room(id=src_id).id, self.find_room(id=wk_id).id
         path = self.find_shortest_map_path(src_id=src_room_id, wk_id=wk_room_id, )
         
-        return self.house.adjacency[wk_room_id, path[-2]]
+        return int(self.house.adjacency[wk_room_id, path[-2]])
     
     def is_data_neighbor(self, src_id, wk_id, ):
         '''
@@ -744,11 +757,14 @@ class Map_graph(object):
     def inSameRoom(self, id1, id2):
         return self.house.inSameRoom(id1, id2)
     
-    def find_room(self, area=None, id=None, ):
-        return self.house.find_room(area=area, id=id)
+    def find_room(self, id=None, area=None, ):
+        return self.house.find_room(id=id, area=area, )
     
     def get_area_by_id(self, id):
         return self.house.get_area_by_id(id=id)
+    
+    def get_neighbors(self, id):
+        return self.house.get_neighbors(id=id)
 
 
 if __name__ == '__main__':

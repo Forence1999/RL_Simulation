@@ -11,8 +11,8 @@ import sys
 import time
 import numpy as np
 # from agent_d3qn import DQNAgent
-from agent_sac import SACAgent
-from env import MAP_ENV
+from agent.agent_sac import SACAgent
+from environment.env import MAP_ENV
 from lib import utils
 
 

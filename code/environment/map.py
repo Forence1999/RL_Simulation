@@ -77,7 +77,8 @@ class Map_graph(object):
                        ]
         self.num_node = len(coordinates)
         self.coordinates = np.array(coordinates)
-        map_adj = np.load('./adjacency_list.npz')['adjacency_list']
+        adj_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), './adjacency_list.npz')
+        map_adj = np.load(adj_path)['adjacency_list']
         self.map_adj = np.array(map_adj)  # [nodes, nodes]: store the distance between each pair of map nodes
         
         self.nodes = np.array([Node() for _ in range(self.num_node)])
@@ -283,17 +284,17 @@ class Map_graph(object):
         :return:
         '''
         if src_id is None:
-            return np.random.choice(self.src_ids, 1)[0]
+            return random.choice(self.src_ids)
         else:
             children = np.where(self.data_adj_ls[src_id], )[0]
-            return np.random.choice(children, 1)[0]
+            return random.choice(children)
     
     def random_doa(self, ):
         '''
         return a doa randomly.
         :return:
         '''
-        return np.random.choice(np.arange(8), 1)[0]
+        return random.choice(range(8))
 
 
 if __name__ == '__main__':

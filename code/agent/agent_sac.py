@@ -18,7 +18,7 @@ from collections import deque
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from agent_models import FeatureExtractor, SAC_actor, SAC_critic
+from .agent_models import FeatureExtractor, SAC_actor, SAC_critic
 
 EPS = np.finfo(float).eps
 
