@@ -116,13 +116,17 @@ class SACAgent(object):
         return -np.log(1.0 / action_space_size) * 0.5
     
     # @tf.function(experimental_relax_shapes=True)
-    def __compute_Q_targets__(self, rewards, next_states, dones):
+    def __compute_Q_targets__(self, rewards, next_states, dones, useMask=False):
+        init_next_states = next_states
+        if useMask:
+            next_states, next_masks = list(zip(*next_states))
+        next_states = np.array(next_states)
         
         alpha = tf.convert_to_tensor(self.alpha)
         reward_scale = tf.convert_to_tensor(self.reward_scale)
         discount = tf.convert_to_tensor(self.discount_rate)
         
-        next_actions, (next_probs, next_log_probs), _ = self.actions_and_log_probs(next_states)
+        next_actions, (next_probs, next_log_probs), _ = self.actions_and_log_probs(init_next_states, useMask=useMask)
         next_Qs_values = tuple(Q(next_states) for Q in self.Q_targets)
         next_Q_values = tf.reduce_min(next_Qs_values, axis=0)
         next_values = next_probs * (next_Q_values - alpha * next_log_probs)
@@ -134,13 +138,17 @@ class SACAgent(object):
         return tf.stop_gradient(Q_targets)
     
     # @tf.function(experimental_relax_shapes=True)
-    def __update_critic__(self, states, actions, rewards, next_states, dones):
+    def __update_critic__(self, states, actions, rewards, next_states, dones, useMask=False):
         '''
         Update the Q-function.
         See Equations (5, 6) in [1], for further information of the Q-function update rule.
         '''
+        init_next_states = next_states
+        if useMask:
+            (states, masks), (next_states, masks_) = list(zip(*states)), list(zip(*next_states))
+        states, next_states = np.array(states), np.array(next_states)
         
-        Q_targets = self.__compute_Q_targets__(rewards, next_states, dones)
+        Q_targets = self.__compute_Q_targets__(rewards, init_next_states, dones, useMask=useMask)
         Q_targets = tf.expand_dims(Q_targets, axis=1)
         Qs_values = []
         Qs_losses = []
@@ -160,19 +168,27 @@ class SACAgent(object):
         return Qs_values, Qs_losses
     
     # @tf.function(experimental_relax_shapes=True)
-    def __update_actor__(self, states):
+    def __update_actor__(self, states, useMask=False):
         '''
         Update the policy.
 
         See Section 4.2 in [1], for further information of the policy update,
         and Section 5 in [1] for further information of the entropy update.
         '''
+        if useMask:
+            states, masks = list(zip(*states))
+            masks = np.array(masks)
+        states = np.array(states)
         
         alpha = tf.convert_to_tensor(self.alpha)
         states = tf.convert_to_tensor(states)
         
         with tf.GradientTape() as tape:
-            actions, (probs, log_probs), _ = self.actions_and_log_probs(states)
+            if useMask:
+                temp_states = list(zip(states, masks))
+                actions, (probs, log_probs), _ = self.actions_and_log_probs(temp_states, useMask=useMask)
+            else:
+                actions, (probs, log_probs), _ = self.actions_and_log_probs(states)
             Qs_targets = tuple(Q(states) for Q in self.Qs)
             Q_targets = tf.reduce_min(Qs_targets, axis=0)
             
@@ -186,8 +202,8 @@ class SACAgent(object):
         return policy_losses
     
     # @tf.function(experimental_relax_shapes=True)
-    def __update_alpha__(self, states):
-        actions, (probs, log_probs), _ = self.actions_and_log_probs(states)
+    def __update_alpha__(self, states, useMask=False):
+        actions, (probs, log_probs), _ = self.actions_and_log_probs(states, useMask=useMask)
         actions, probs, log_probs = tf.stop_gradient(actions), tf.stop_gradient(probs), tf.stop_gradient(log_probs)
         
         with tf.GradientTape() as tape:
@@ -237,23 +253,25 @@ class SACAgent(object):
         a_dir = os.path.join(model_dir, 'alpha.npz', )
         np.savez(file=a_dir, alpha=np.array(self.alpha), log_alpha=np.array(self.log_alpha))
     
-    def remember(self, state, action, reward, state_, done, ):
+    def remember(self, state, action, reward, state_, done, useMask=False):
         '''
         save the experience to memory buffer.
         '''
-        
+        if useMask:
+            (state, mask), (state_, mask_) = state, state_
         if state_ is not None:
             state_ = self.feature_extractor.predict(np.array([state_]))[0]
         
-        for i in range(4):
-            state = np.roll(state, shift=2, axis=-1)
-            action = (action + 8 - 2) % 8
-            # extract feature to remember
-            feature_state = self.feature_extractor.predict(np.array([state]))[0]
-            experience = feature_state, action, reward, state_, done
-            self.memory.append(experience)
+        # for i in range(4):
+        #     state = np.roll(state, shift=2, axis=-1)
+        #     action = (action + 8 - 2) % 8
+        # extract feature to remember
+        feature_state = self.feature_extractor.predict(np.array([state]))[0]
+        experience = ((feature_state, mask), action, reward, (state_, mask_), done) if useMask \
+            else (feature_state, action, reward, state_, done)
+        self.memory.append(experience)
     
-    def remember_batch(self, batch_experience, useDiscount=True):
+    def remember_batch(self, batch_experience, useDiscount=True, useMask=False):
         '''
         save a batch of experience to memory buffer.
         if discount: apply discount to the reward.
@@ -262,12 +280,12 @@ class SACAgent(object):
             for i in range(len(batch_experience) - 2, -1, -1):
                 batch_experience[i][2] += self.discount_rate * batch_experience[i + 1][2]
         for experience in batch_experience:
-            self.remember(*experience)
+            self.remember(*experience, useMask=useMask)
     
-    def learn_sample(self, state, action, reward, state_, done, ):
-        self.learn_per_batch([state], [action], [reward], [state_], [done], )
+    def learn_sample(self, state, action, reward, state_, done, useMask=False):
+        self.learn_per_batch([state], [action], [reward], [state_], [done], useMask=useMask)
     
-    def learn_per_batch(self, states, actions, rewards, next_states, dones, ):
+    def learn_per_batch(self, states, actions, rewards, next_states, dones, useMask=False):
         '''
         optimize the model for one batch
         :param state:
@@ -277,18 +295,22 @@ class SACAgent(object):
         :param done:
         :return:
         '''
+        # if useMask:
+        #     (states, masks), (next_states, masks_) = list(zip(*states)), list(zip(*next_states))
+        #     masks, masks_ = np.array(masks), np.array(masks_)
+        
         states, next_states = np.array(states), np.array(next_states)
         actions = np.array(actions, dtype=np.int32)
         rewards = np.array(rewards, dtype=np.float32)
         dones = np.array(dones, dtype=np.bool)
         
-        Qs_values, Qs_losses = self.__update_critic__(states, actions, rewards, next_states, dones)
-        policy_losses = self.__update_actor__(states)
-        alpha_losses = self.__update_alpha__(states)
+        Qs_values, Qs_losses = self.__update_critic__(states, actions, rewards, next_states, dones, useMask=useMask)
+        policy_losses = self.__update_actor__(states, useMask=useMask)
+        alpha_losses = self.__update_alpha__(states, useMask=useMask)
         
         return (Qs_values, Qs_losses), policy_losses, alpha_losses
     
-    def replay(self, ):
+    def replay(self, useMask=False):
         '''
         experience replay and learn on a batch
         '''
@@ -297,43 +319,54 @@ class SACAgent(object):
         state, action, reward, state_, done = [], [], [], [], []
         for i_state, i_action, i_reward, i_state_, i_done in minibatch:
             state.append(i_state), action.append(i_action), reward.append(i_reward), done.append(i_done)
-            state_.append(i_state_ if (i_state_ is not None) else i_state)
-        state, state_ = np.array(state), np.array(state_)
-        action = np.array(action, dtype=np.int32)
-        reward = np.array(reward, dtype=np.float32)
-        done = np.array(done, dtype=np.bool)
+            if useMask:
+                state_.append(i_state_ if (i_state_[0] is not None) else i_state)
+            else:
+                state_.append(i_state_ if (i_state_ is not None) else i_state)
         
         return state, action, reward, state_, done
     
-    def learn(self, learnTimes=None):
+    def learn(self, learnTimes=None, useMask=False):
         learnTimes = self.learnTimes if learnTimes is None else learnTimes
         for _ in range(learnTimes):
-            state, action, reward, state_, done = self.replay()
-            self.learn_per_batch(state, action, reward, state_, done)
+            state, action, reward, state_, done = self.replay(useMask=useMask)
+            self.learn_per_batch(state, action, reward, state_, done, useMask=useMask)
     
-    def actions_and_log_probs(self, states):
+    def actions_and_log_probs(self, states, useMask=False):
         """Given the state, produces an action, the probability of the action, the log probability of the action, and
         the argmax action"""
-        
+        if useMask:
+            states, masks = list(zip(*states))
+            states, masks = np.array(states), np.array(masks)
+        else:
+            states = np.array(states)
         # states = self.feature_extractor.predict(states)
         action_probs = self.policy(states)
+        if useMask:
+            action_probs = action_probs * masks
+            action_probs = action_probs / tf.math.reduce_sum(action_probs, axis=-1, keepdims=True)
         log_action_probs = tf.math.log(action_probs + EPS)
         max_prob_actions = tf.math.argmax(action_probs, axis=-1)
         actions = tfp.distributions.Categorical(probs=action_probs, dtype=tf.int32).sample()  # .cpu()
         
         return actions, (action_probs, log_action_probs), max_prob_actions
     
-    def act(self, state, **kwargs):
+    def act(self, state, useMask=None, **kwargs):
         '''
         return the action and explore_prob based on eps_decay
         :param state:
         :return:
         '''
-        action_prob = self.predict(state)
+        if useMask:
+            state, mask = state
+        else:
+            mask = None
+        action_prob = self.predict(state)[0]
+        action_prob = action_prob * mask if useMask is not None else action_prob
         # log_action_prob = np.log(action_prob + EPS)
         # max_prob_action = np.argmax(action_prob, dim=-1)
-        action = tfp.distributions.Categorical(probs=action_prob, dtype=tf.int32).sample()[0]  # .cpu()
-        return np.asarray(action), (float(action_prob[0][action]), float(self.alpha.numpy()))
+        action = tfp.distributions.Categorical(probs=action_prob, dtype=tf.int32).sample()
+        return np.asarray(action), (float(action_prob[action]), float(self.alpha.numpy()))
     
     def predict(self, state, ):
         '''

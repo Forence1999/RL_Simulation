@@ -19,14 +19,15 @@ class RL_game():
     def __init__(self, agent_learn=True, reward_discount_rate=0.75, lr=0.0001, softUpdate_tau=0.1,
                  batch_size=64, learnTimes=1, episodes=500, eps_decay=False, min_eps=0.1,
                  base_model_dir='../model/base_model', load_d3qn_model=False, based_on_base_model=True,
-                 num_update_episode=1, d3qn_model_dir=None, model_name=None, memory_size=1024, **kwargs):
+                 num_update_episode=1, d3qn_model_dir=None, model_name=None, memory_size=1024,
+                 max_episode_steps=50, **kwargs):
         super(RL_game, self).__init__()
         self.AGENT_CLASS = 'D3QN'
         self.useMask = True
         # self.agent_learn = True
         self.agent_learn = agent_learn
         self.print_interval = 10
-        self.max_episode_steps = 50  # 一个episode最多探索多少步，超过则强行终止。
+        self.max_episode_steps = max_episode_steps  # 一个episode最多探索多少步，超过则强行终止。
         # self.num_update_episode = 10  # update target model and reward graph & data
         self.num_update_episode = num_update_episode  # update target model and reward graph & data
         self.num_save_episode = 100
@@ -144,8 +145,7 @@ class RL_game():
                 num_step += 1
                 total_step += 1
                 
-                action, exp_pro = self.agent.act(state[0], decay_step=total_step, mask=state[1]) if self.useMask \
-                    else self.agent.act(state[0], decay_step=total_step, )
+                action, exp_pro = self.agent.act(state, decay_step=total_step, useMask=self.useMask)
                 state_, reward, done, info = self.env.step(action)
                 experience_ls.append([state, action, reward, state_, done])
                 state = state_
@@ -211,6 +211,7 @@ if __name__ == '__main__':
     # parser.add_argument('--num_update_episode', type=int, default=10, help='')
     
     parser.add_argument('--agent_learn', type=ast.literal_eval, default=True, help='')
+    parser.add_argument('--max_episode_steps', type=int, default=70, help='')
     parser.add_argument('--lr', type=float, default=0.0001, help='')
     parser.add_argument('--batch_size', type=int, default=128, help='')
     parser.add_argument('--memory_size', type=int, default=4096, help='')
@@ -218,7 +219,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_update_episode', type=int, default=1, help='')
     parser.add_argument('--softUpdate_tau', type=float, default=0.01, help='')
     parser.add_argument('--episodes', type=int, default=1500, help='')
-    parser.add_argument('--reward_discount_rate', type=float, default=0.75, help='')
+    parser.add_argument('--reward_discount_rate', type=float, default=0.99, help='')
     
     parser.add_argument('--eps_decay', type=ast.literal_eval, default=False, help='')
     parser.add_argument('--min_eps', type=float, default=0.1, help='')

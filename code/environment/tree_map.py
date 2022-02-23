@@ -24,7 +24,7 @@ from matplotlib import pyplot as plt
 
 EPS = np.finfo(float).eps * 4
 global_ID = 20  # leave the previous IDs for Rooms
-MIN_LINE_LENGTH = 40
+MAX_LINE_LENGTH = 40  # maximum length of the side of one area
 
 
 class Area(object):
@@ -53,7 +53,7 @@ class Area(object):
         line1, line2 = self.vertex[:2], self.vertex[1:3]
         length1, length2 = Area.calculate_line_length(*line1, ), Area.calculate_line_length(*line2, )
         
-        if length1 > MIN_LINE_LENGTH and length2 > MIN_LINE_LENGTH:
+        if length1 > MAX_LINE_LENGTH and length2 > MAX_LINE_LENGTH:
             vertex0 = [self.center, self.line_centers[3], self.vertex[0], self.line_centers[0]]
             vertex1 = [self.center, self.line_centers[0], self.vertex[1], self.line_centers[1]]
             vertex2 = [self.center, self.line_centers[1], self.vertex[2], self.line_centers[2]]
@@ -62,13 +62,13 @@ class Area(object):
             return [Area(vertex0, parent=self), Area(vertex1, parent=self),
                     Area(vertex2, parent=self), Area(vertex3, parent=self), ]
         
-        elif length1 > MIN_LINE_LENGTH and length2 <= MIN_LINE_LENGTH:
+        elif length1 > MAX_LINE_LENGTH and length2 <= MAX_LINE_LENGTH:
             vertex0 = [self.line_centers[0], self.line_centers[2], self.vertex[3], self.vertex[0], ]
             vertex1 = [self.line_centers[2], self.line_centers[0], self.vertex[1], self.vertex[2], ]
             
             return [Area(vertex0, parent=self), Area(vertex1, parent=self), ]
         
-        elif length1 <= MIN_LINE_LENGTH and length2 > MIN_LINE_LENGTH:
+        elif length1 <= MAX_LINE_LENGTH and length2 > MAX_LINE_LENGTH:
             vertex0 = [self.line_centers[1], self.line_centers[3], self.vertex[0], self.vertex[1], ]
             vertex1 = [self.line_centers[3], self.line_centers[1], self.vertex[2], self.vertex[3], ]
             
@@ -704,7 +704,8 @@ class Map_graph(object):
         :param direction:
         :return:
         '''
-        return self.nodes[base_id].get_neighbor()[direction]
+        neighbors = self.get_area_by_id(id=base_id).neighbors
+        return neighbors[direction].id
     
     def find_relative_direction(self, src_id, wk_id, ):
         '''

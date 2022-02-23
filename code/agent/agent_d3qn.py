@@ -143,10 +143,9 @@ class DQNAgent(object):
         #     action = (action + 8 - 2) % 8
         # extract feature to remember
         feature_state = self.feature_extractor.predict(np.array([state]))[0]
-        if useMask:
-            experience = (feature_state, mask), action, reward, (state_, mask_), done
-        else:
-            experience = feature_state, action, reward, state_, done
+        
+        experience = ((feature_state, mask), action, reward, (state_, mask_), done) if useMask \
+            else (feature_state, action, reward, state_, done)
         
         if self.usePER:
             self.MEMORY.append(experience)
@@ -242,13 +241,17 @@ class DQNAgent(object):
         for _ in range(learnTimes):
             self.replay(useMask=useMask)
     
-    def act(self, state, decay_step, mask=None):
+    def act(self, state, decay_step, useMask=False):
         '''
         return the action and explore_prob based on eps_decay
         :param state:
         :param decay_step:
         :return:
         '''
+        if useMask:
+            state, mask = state
+        else:
+            mask = None
         
         # EPSILON GREEDY STRATEGY
         if self.eps_decay:  # Improved version of epsilon greedy strategy for Q-learning
@@ -261,7 +264,7 @@ class DQNAgent(object):
         else:  # Get action from Q-network (exploitation)
             y_pred = self.predict(state)[0]
             y_prob = softmax(y_pred)
-            y_prob = y_prob * mask if mask is not None else y_prob
+            y_prob = y_prob * mask if useMask else y_prob
             # print('y_pred:', y_pred[0])
             return np.argmax(y_prob), explore_prob
     

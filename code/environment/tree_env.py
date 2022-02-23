@@ -166,9 +166,8 @@ class MAP_ENV(object):
         # else:
         #     self.wk_id, self.abs_doa = next_id, (next_abs_doa - 2 + 8) % 8
         #     return True
-        
-        neighbors = self.map.get_area_by_id(id=self.wk_id).neighbors
-        self.wk_id, self.abs_doa = neighbors[abs_action].id, abs_action
+        self.wk_id = self.map.find_id_by_direction(base_id=self.wk_id, direction=abs_action)
+        self.abs_doa = abs_action
     
     def get_abs_action(self, action, ):  # Checked
         '''
