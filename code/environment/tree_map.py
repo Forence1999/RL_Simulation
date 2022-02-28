@@ -50,8 +50,9 @@ class Area(object):
         self.center = self.center if center is None else center  # This adjusted center is not the one for child division any more.
     
     def __generate_children__(self, ):
-        line1, line2 = self.vertex[:2], self.vertex[1:3]
-        length1, length2 = Area.calculate_line_length(*line1, ), Area.calculate_line_length(*line2, )
+        line1, line2, line3, line4 = self.vertex[:2], self.vertex[1:3], self.vertex[2:4], self.vertex[[3, 0]]
+        length1, length2 = max(Area.calculate_line_length(*line1, ), Area.calculate_line_length(*line3, )), \
+                           max(Area.calculate_line_length(*line2, ), Area.calculate_line_length(*line4, ))
         
         if length1 > MAX_LINE_LENGTH and length2 > MAX_LINE_LENGTH:
             vertex0 = [self.center, self.line_centers[3], self.vertex[0], self.line_centers[0]]
@@ -218,6 +219,7 @@ class House(object):
         
         self.graph = self.construct_graph()  # a graph of map nodes to represent direct distance
         self.set_neighbors()
+        self.leaf_graph = self.construct_leaf_graph()
         self.areas = self.collect_areas()
     
     def __create_rooms__(self, vertexes, centers=None, parent=None):
@@ -346,6 +348,14 @@ class House(object):
         nx.draw(self.graph, ax=ax, with_labels=True, pos=pos_dict)
         plt.show()
     
+    def show_leaf_graph(self, ):
+        nodes = self.leaf_graph.nodes()
+        pos_dict = dict([(i, np.array(self.areas[i].center) * 10) for i in nodes])
+        
+        fig, ax = plt.subplots(figsize=(12, 10))
+        nx.draw(self.leaf_graph, ax=ax, with_labels=True, pos=pos_dict)
+        plt.show()
+    
     def show_rooms(self, ):
         nodes = self.get_nodes()
         area_info = [(node.id, node.vertex, node.center,) for node in nodes]
@@ -378,13 +388,15 @@ class House(object):
         plt.show()
     
     def show(self, ):
-        self.show_graph()
-        self.show_rooms()
-        self.show_tree()
-        self.show_leaves()
-        self.show_neighbors_of_leaves()
+        # self.show_graph()
+        # self.show_rooms()
+        # self.show_tree()
+        # self.show_leaves()
+        # self.show_neighbors_of_leaves()
+        self.show_leaf_graph()
     
     def set_neighbors(self, ):
+        ''' For every leaf, find its neighbors and set them in the leaf. '''
         
         def find_node_of_direction(img, id, center, transform):
             def verify_PointLegitimacy(point, img):
@@ -406,6 +418,9 @@ class House(object):
                     counter = dict()
                     x, y = transform(x, y)
                     continue
+                elif img[x, y] == -2:
+                    x, y = transform(x, y)
+                    continue
                 elif img[x, y] == -1:
                     counter[-1] = counter[-1] + 1 if -1 in counter else 1
                 else:
@@ -418,6 +433,7 @@ class House(object):
             # return None if ((res is False) or (res == -1)) else res
             return None if ((res is False) or (res == -1)) else res
         
+        # plot every leaf on the image
         import cv2
         
         leaves = self.get_leaves()
@@ -426,11 +442,14 @@ class House(object):
         y_max, x_max = np.ceil(np.max(vertexes, axis=(0, 1))).astype(int)
         
         leaf_img = np.full(shape=(x_max, y_max,), fill_value=-1, dtype=np.int32)
+        cv2.fillConvexPoly(leaf_img, np.array([(175, 250), (250, 250), (250, 210), (175, 210)]),
+                           -2)  # for deprecated areas(5 & 11)
+        cv2.fillConvexPoly(leaf_img, np.array([(317, 250), (515, 250), (515, 210), (317, 210)]), -2)
         for id, vertex, _ in leaf_info:
             vertex = np.rint(vertex).astype(int)
             cv2.fillConvexPoly(leaf_img, vertex, id)
-        # plt.imshow(leaf_img)
-        # plt.show()
+        plt.imshow(leaf_img)
+        plt.show()
         
         # print('set neighbors...')
         neighbors_ls = []
@@ -485,6 +504,7 @@ class House(object):
         return inter_area
     
     def collect_areas(self, ):
+        ''' organize all the areas in the tree into a list. And index them by their ids. '''
         nodes = self.get_nodes()
         
         id_max = max([node.id for node in nodes])
@@ -525,6 +545,18 @@ class House(object):
         ''' Get the neighbors of the area with id. '''
         area = self.get_area_by_id(id=id)
         return area.neighbors
+    
+    def construct_leaf_graph(self, ):
+        leaves = self.get_leaves()
+        
+        G = nx.Graph()
+        for leaf in leaves:
+            for neighbor in leaf.neighbors:
+                if neighbor is None:
+                    continue
+                G.add_edge(leaf.id, neighbor.id)
+        
+        return G
 
 
 class Dataset_Graph(object):
@@ -650,17 +682,18 @@ class Map_graph(object):
                         [550, 15],  # 20
                         ]
         self.vertexes = [None,  # 0
+        
                          [(4, 450), (145, 450), (145, 418), (4, 418)],  # 1
                          [(145, 418), (175, 418), (175, 250), (145, 250)],  # 2
                          [(175, 450), (515, 450), (515, 418), (175, 418)],  # 3
                          [(515, 418), (545, 418), (545, 250), (515, 250)],  # 4
-                         None,  # 5
+                         None,  # [(175, 250), (250, 250), (250, 210), (175, 210)],  # 5
                          None,  # 6
                          None,  # 7
                          [(250, 210), (317, 210), (317, 42), (250, 42)],  # 8
                          [(180, 42), (250, 42), (250, 12), (180, 12)],  # 9
                          [(317, 42), (500, 42), (500, 12), (317, 12)],  # 10
-                         None,  # 11
+                         None,  # [(317, 250), (515, 250), (515, 210), (317, 210)],  # 11
                          [(145, 450), (175, 450), (175, 418), (145, 418)],  # 12
                          [(515, 450), (545, 450), (545, 418), (515, 418)],  # 13
                          [(250, 250), (317, 250), (317, 210), (250, 210)],  # 14

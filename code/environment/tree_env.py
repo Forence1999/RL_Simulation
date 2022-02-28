@@ -183,13 +183,8 @@ class MAP_ENV(object):
         :param action:
         :return:
         '''
-        self.next_pose(action=action)
-        # doAction = self.next_pose(action=action)
         
         # setting rewards
-        # reward = -0.05
-        # if not doAction:
-        #     reward -= 0.1
         
         reward = -0.05
         if self.map.inSameRoom(id1=self.src_id, id2=self.wk_id):
@@ -202,6 +197,9 @@ class MAP_ENV(object):
             state_ = self.get_state(src_id=self.src_id, wk_id=self.wk_id, abs_doa=self.abs_doa)
             mask_ = self.get_mask(wk_id=self.wk_id, abs_doa=self.abs_doa)
         info = None
+        
+        self.next_pose(action=action)
+        # doAction = self.next_pose(action=action)
         
         return (state_, mask_), reward, done, info
     
