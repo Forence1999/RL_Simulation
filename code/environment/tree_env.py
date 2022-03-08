@@ -51,6 +51,7 @@ class MAP_ENV(object):
         done = False
         
         self.src_id, self.wk_id, self.abs_doa, self.done = src_id, wk_id, abs_doa, done
+        self.subsrc_id = None
         
         return (state, mask), self.done
     
@@ -99,9 +100,11 @@ class MAP_ENV(object):
         wk_basename = '_'.join(['walker', ] + list(map(str, wk_coord)) + ['1', ])
         data_path = self.map.find_shortest_data_path(src_id=src_id, wk_id=wk_id, )
         sub_src_id = data_path[-2]
+        self.sub_src_id = sub_src_id
         sub_src_coord = self.map.get_room_center(id=sub_src_id)
         sub_src_basename = '_'.join(['src', ] + list(map(str, sub_src_coord)))
         src_doa = self.get_src_doa(src_id=sub_src_id, wk_id=wk_id, abs_doa=abs_doa)
+        
         # print('sub_src_key:', sub_src_key, 'wk_key:', wk_key)
         
         state_path_ls = None
@@ -114,6 +117,7 @@ class MAP_ENV(object):
                 doa_data_path = os.path.join(self.ds_path, sub_src_basename, wk_basename, str_doa, )
                 if os.path.exists(doa_data_path):
                     state_path_ls = utils.get_files_by_suffix(root=doa_data_path, suffix='.npz')
+                    self.sub_src_doa = j
                     break
             if state_path_ls is not None:
                 break
@@ -177,6 +181,26 @@ class MAP_ENV(object):
         '''
         return (action + self.abs_doa) % self.num_actions
     
+    def generate_reward(self, action):
+        abs_action = self.get_abs_action(action)
+        src_doa = self.sub_src_doa
+        diff_doa = 4 - abs(abs(src_doa - abs_action) - 4)
+        
+        if diff_doa == 0:
+            reward = 0.6
+        elif diff_doa == 1:
+            reward = 0.4
+        elif diff_doa == 2:
+            reward = 0.2
+        elif diff_doa == 3:
+            reward = -0.2
+        elif diff_doa == 4:
+            reward = -0.4
+        else:
+            raise ValueError('diff_doa:', diff_doa)
+        
+        return reward
+    
     def step(self, action, ):  # Checked
         '''
         Ask walker to take the action and update the relevant state variables.
@@ -186,10 +210,11 @@ class MAP_ENV(object):
         
         # setting rewards
         
-        reward = -0.05
+        reward = self.generate_reward(action)
+        self.next_pose(action=action)
+        
         if self.map.inSameRoom(id1=self.src_id, id2=self.wk_id):
             done = True
-            reward += 1.
             state_ = None
             mask_ = None
         else:
@@ -197,9 +222,6 @@ class MAP_ENV(object):
             state_ = self.get_state(src_id=self.src_id, wk_id=self.wk_id, abs_doa=self.abs_doa)
             mask_ = self.get_mask(wk_id=self.wk_id, abs_doa=self.abs_doa)
         info = None
-        
-        self.next_pose(action=action)
-        # doAction = self.next_pose(action=action)
         
         return (state_, mask_), reward, done, info
     

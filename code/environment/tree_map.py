@@ -29,6 +29,13 @@ MAX_LINE_LENGTH = 40  # maximum length of the side of one area
 
 class Area(object):
     def __init__(self, vertex, center=None, parent=None, id=None):
+        '''
+        
+        :param vertex:
+        :param center: data_center for Simulation
+        :param parent:
+        :param id:
+        '''
         super().__init__()
         
         self.id = self.__set_id__() if id is None else id
@@ -47,7 +54,7 @@ class Area(object):
         self.children = self.__generate_children__()
         self.isLeaf = True if self.children is None else False
         self.num_children = 0 if self.isLeaf else len(self.children)
-        self.center = self.center if center is None else center  # This adjusted center is not the one for child division any more.
+        self.data_center = self.center if center is None else center  # This adjusted center is not the one for child division any more.
     
     def __generate_children__(self, ):
         line1, line2, line3, line4 = self.vertex[:2], self.vertex[1:3], self.vertex[2:4], self.vertex[[3, 0]]
@@ -137,6 +144,7 @@ class Area(object):
         return self.center
     
     def show(self, ):
+        
         def DFS(node, area_info):
             '''
             Depth_First_Search to get all the area_info (id, vertexes, center)
@@ -159,7 +167,7 @@ class Area(object):
 
 
 class House(object):
-    def __init__(self, centers=None, vertexes=None, ):
+    def __init__(self, centers=None, vertexes=None, vertex5=None, vertex11=None):
         super().__init__()
         self.id = 0
         self.center = (270, 225)
@@ -207,6 +215,7 @@ class House(object):
                     None,  # 19
                     [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
                     ] if vertexes is None else vertexes
+        self.vertex5, self.vertex11 = vertex5, vertex11
         self.centers = np.array(centers, dtype=object)
         self.vertexes = np.array(vertexes, dtype=object)
         self.num_room = len(self.centers) - sum(self.centers == None)
@@ -388,11 +397,11 @@ class House(object):
         plt.show()
     
     def show(self, ):
-        # self.show_graph()
-        # self.show_rooms()
-        # self.show_tree()
-        # self.show_leaves()
-        # self.show_neighbors_of_leaves()
+        self.show_graph()
+        self.show_rooms()
+        self.show_tree()
+        self.show_leaves()
+        self.show_neighbors_of_leaves()
         self.show_leaf_graph()
     
     def set_neighbors(self, ):
@@ -442,14 +451,15 @@ class House(object):
         y_max, x_max = np.ceil(np.max(vertexes, axis=(0, 1))).astype(int)
         
         leaf_img = np.full(shape=(x_max, y_max,), fill_value=-1, dtype=np.int32)
-        cv2.fillConvexPoly(leaf_img, np.array([(175, 250), (250, 250), (250, 210), (175, 210)]),
-                           -2)  # for deprecated areas(5 & 11)
-        cv2.fillConvexPoly(leaf_img, np.array([(317, 250), (515, 250), (515, 210), (317, 210)]), -2)
+        if self.vertex5:
+            cv2.fillConvexPoly(leaf_img, np.array(self.vertex5), -2)  # for deprecated areas(5 & 11)
+        if self.vertex11:
+            cv2.fillConvexPoly(leaf_img, np.array(self.vertex11), -2)  # for deprecated areas(5 & 11)
         for id, vertex, _ in leaf_info:
             vertex = np.rint(vertex).astype(int)
             cv2.fillConvexPoly(leaf_img, vertex, id)
-        plt.imshow(leaf_img)
-        plt.show()
+        # plt.imshow(leaf_img)
+        # plt.show()
         
         # print('set neighbors...')
         neighbors_ls = []
@@ -517,6 +527,41 @@ class House(object):
     
     def get_area_by_id(self, id):
         return self.areas[id]
+    
+    def get_id_by_coordinate(self, coordinate):
+        def point_in_area(area, coordinate):
+            vertex = area.vertex
+            P3 = np.asarray(coordinate)
+            
+            for i in range(len(vertex)):
+                P1 = np.asarray(vertex[i % 4])
+                P2 = np.asarray(vertex[(i + 1) % 4])
+                if np.cross(P2 - P1, P3 - P1) > 0:
+                    return False
+            return True
+        
+        def DFS(area):
+            if point_in_area(area, coordinate):
+                if area.isLeaf:
+                    return area.id
+                else:
+                    for child in area.children:
+                        res = DFS(child)
+                        if res is not None:
+                            return res
+            else:
+                return None
+        
+        coordinate = np.asarray(coordinate)
+        
+        for room in self.rooms:
+            if room is None:
+                continue
+            res = DFS(room)
+            if res is not None:
+                return res
+        
+        return None
     
     def inSameRoom(self, id1, id2):
         room_id_1 = self.find_room(id=id1).id
@@ -681,30 +726,53 @@ class Map_graph(object):
                         None,  # 19 [170, 100]
                         [550, 15],  # 20
                         ]
+        # self.vertexes = [None,  # 0
+        #                  [(4, 450), (145, 450), (145, 418), (4, 418)],  # 1
+        #                  [(145, 418), (175, 418), (175, 250), (145, 250)],  # 2
+        #                  [(175, 450), (515, 450), (515, 418), (175, 418)],  # 3
+        #                  [(515, 418), (545, 418), (545, 250), (515, 250)],  # 4
+        #                  None,  # [(175, 250), (250, 250), (250, 210), (175, 210)],  # 5
+        #                  None,  # 6
+        #                  None,  # 7
+        #                  [(250, 210), (317, 210), (317, 42), (250, 42)],  # 8
+        #                  [(180, 42), (250, 42), (250, 12), (180, 12)],  # 9
+        #                  [(317, 42), (500, 42), (500, 12), (317, 12)],  # 10
+        #                  None,  # [(317, 250), (515, 250), (515, 210), (317, 210)],  # 11
+        #                  [(145, 450), (175, 450), (175, 418), (145, 418)],  # 12
+        #                  [(515, 450), (545, 450), (545, 418), (515, 418)],  # 13
+        #                  [(250, 250), (317, 250), (317, 210), (250, 210)],  # 14
+        #                  None,  # 15
+        #                  [(250, 42), (317, 42), (317, 12), (250, 12)],  # 16
+        #                  [(145, 250), (175, 250), (175, 210), (145, 210)],  # 17
+        #                  [(515, 250), (545, 250), (545, 210), (515, 210)],  # 18
+        #                  None,  # 19
+        #                  [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
+        #                  ]
         self.vertexes = [None,  # 0
-        
-                         [(4, 450), (145, 450), (145, 418), (4, 418)],  # 1
-                         [(145, 418), (175, 418), (175, 250), (145, 250)],  # 2
-                         [(175, 450), (515, 450), (515, 418), (175, 418)],  # 3
-                         [(515, 418), (545, 418), (545, 250), (515, 250)],  # 4
-                         None,  # [(175, 250), (250, 250), (250, 210), (175, 210)],  # 5
+                         [(44, 458), (183, 455), (183, 425), (43, 427)],  # 1
+                         [(183, 425), (212, 424), (210, 254), (180, 254)],  # 2
+                         [(212, 454), (555, 450), (553, 420), (212, 424)],  # 3
+                         [(553, 420), (583, 420), (581, 247), (551, 248)],  # 4
+                         None,  # [(210, 254), (284, 253), (284, 216), (209, 217)],  # 5
                          None,  # 6
                          None,  # 7
-                         [(250, 210), (317, 210), (317, 42), (250, 42)],  # 8
-                         [(180, 42), (250, 42), (250, 12), (180, 12)],  # 9
-                         [(317, 42), (500, 42), (500, 12), (317, 12)],  # 10
-                         None,  # [(317, 250), (515, 250), (515, 210), (317, 210)],  # 11
-                         [(145, 450), (175, 450), (175, 418), (145, 418)],  # 12
-                         [(515, 450), (545, 450), (545, 418), (515, 418)],  # 13
-                         [(250, 250), (317, 250), (317, 210), (250, 210)],  # 14
+                         [(284, 216), (351, 215), (348, 45), (282, 46)],  # 8
+                         [(214, 45), (282, 46), (282, 16), (214, 16)],  # 9
+                         [(348, 45), (530, 42), (530, 11), (348, 14)],  # 10
+                         None,  # [(351, 251), (551, 248), (549, 212), (351, 215)],  # 11
+                         [(183, 455), (212, 454), (212, 424), (183, 425)],  # 12
+                         [(555, 450), (584, 449), (583, 420), (553, 420)],  # 13
+                         [(284, 253), (351, 251), (351, 215), (284, 216)],  # 14
                          None,  # 15
-                         [(250, 42), (317, 42), (317, 12), (250, 12)],  # 16
-                         [(145, 250), (175, 250), (175, 210), (145, 210)],  # 17
-                         [(515, 250), (545, 250), (545, 210), (515, 210)],  # 18
+                         [(282, 46), (348, 45), (348, 14), (282, 16)],  # 16
+                         [(180, 254), (210, 254), (209, 217), (178, 218)],  # 17
+                         [(551, 248), (581, 247), (580, 211), (549, 212)],  # 18
                          None,  # 19
-                         [(500, 42), (700, 42), (700, 12), (500, 12)],  # 20
+                         [(530, 42), (730, 38), (730, 8), (530, 11)],  # 20
                          ]
-        self.house = House(centers=self.centers, vertexes=self.vertexes)
+        vertex5 = [(210, 254), (284, 253), (284, 216), (209, 217)]
+        vertex11 = [(351, 251), (551, 248), (549, 212), (351, 215)]
+        self.house = House(centers=self.centers, vertexes=self.vertexes, vertex5=vertex5, vertex11=vertex11)
         self.map_graph = self.house.graph
         self.dataset_graph = Dataset_Graph(ds_path=self.ds_path, map_graph=self.map_graph, centers=self.centers)
         self.data_graph = self.dataset_graph.graph
@@ -797,6 +865,9 @@ class Map_graph(object):
     def get_area_by_id(self, id):
         return self.house.get_area_by_id(id=id)
     
+    def get_id_by_coordinate(self, coordinate):
+        return self.house.get_id_by_coordinate(coordinate=coordinate)
+    
     def get_neighbors(self, id):
         return self.house.get_neighbors(id=id)
 
@@ -825,5 +896,5 @@ if __name__ == '__main__':
     
     map_graph = Map_graph(ds_path=ds_path)
     map_graph.house.show()
-    
+    print(map_graph.get_id_by_coordinate(coordinate=(250, 211)))
     print('Brand-new World!')

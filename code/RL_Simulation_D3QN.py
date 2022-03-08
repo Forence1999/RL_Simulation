@@ -153,7 +153,8 @@ class RL_game():
                 
                 if num_step >= self.max_episode_steps:
                     break
-            episode_rewards.append(np.sum(step_rewards))
+            # episode_rewards.append(np.average(step_rewards))
+            episode_rewards.append(num_step)
             if self.agent_learn:
                 self.agent.remember_batch(batch_experience=experience_ls, useDiscount=True, useMask=self.useMask)
                 self.agent.learn(useMask=self.useMask)
@@ -161,7 +162,7 @@ class RL_game():
             print('episode:', episode_idx, '\t',
                   'done:', done, '\t',
                   'steps:', num_step, '\t',
-                  'crt_reward:', np.around(episode_rewards[-1], 3), '\t',
+                  'crt_reward:', np.around(np.average(step_rewards), 3), '\t',
                   f'avg_reward_{self.num_smooth_reward}:',
                   np.around(
                       np.mean(
@@ -211,7 +212,7 @@ if __name__ == '__main__':
     # parser.add_argument('--num_update_episode', type=int, default=10, help='')
     
     parser.add_argument('--agent_learn', type=ast.literal_eval, default=True, help='')
-    parser.add_argument('--max_episode_steps', type=int, default=70, help='')
+    parser.add_argument('--max_episode_steps', type=int, default=50, help='')
     parser.add_argument('--lr', type=float, default=0.0001, help='')
     parser.add_argument('--batch_size', type=int, default=128, help='')
     parser.add_argument('--memory_size', type=int, default=4096, help='')
@@ -219,10 +220,10 @@ if __name__ == '__main__':
     parser.add_argument('--num_update_episode', type=int, default=1, help='')
     parser.add_argument('--softUpdate_tau', type=float, default=0.01, help='')
     parser.add_argument('--episodes', type=int, default=1500, help='')
-    parser.add_argument('--reward_discount_rate', type=float, default=0.99, help='')
+    parser.add_argument('--reward_discount_rate', type=float, default=0., help='')
     
     parser.add_argument('--eps_decay', type=ast.literal_eval, default=False, help='')
-    parser.add_argument('--min_eps', type=float, default=0.1, help='')
+    parser.add_argument('--min_eps', type=float, default=0.5, help='')
     parser.add_argument('--base_model_dir', type=str, default='../model/base_model_fullData_wBN', help='')
     parser.add_argument('--d3qn_model_dir', type=str, default='../model/d3qn_model', help='')
     # parser.add_argument('--model_name', type=str, default='Dueling_DDQN_softUpdate__lr_0.0001_20220212-235802', help='')

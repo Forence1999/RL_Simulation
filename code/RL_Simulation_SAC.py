@@ -135,7 +135,8 @@ class RL_game():
                 
                 if num_step >= self.max_episode_steps:
                     break
-            episode_reward.append(np.sum(e_reward))
+            # episode_reward.append(np.average(e_reward))
+            episode_reward.append(num_step)
             if self.agent_learn:
                 self.agent.remember_batch(batch_experience=experience_ls, useDiscount=True, useMask=self.useMask)
                 self.agent.learn(useMask=self.useMask)
@@ -143,7 +144,7 @@ class RL_game():
             print('episode:', episode_idx, '\t',
                   'done:', done, '\t',
                   'steps:', num_step, '\t',
-                  'crt_reward:', np.around(episode_reward[-1], 3), '\t',
+                  'crt_reward:', np.around(np.average(e_reward), 3), '\t',
                   f'avg_reward_{self.num_smooth_reward}:',
                   np.around(
                       np.mean(episode_reward[-self.num_smooth_reward if episode_idx >= self.num_smooth_reward else 0:]),
@@ -154,9 +155,9 @@ class RL_game():
             if (episode_idx + 1) % self.num_plot_episode == 0:
                 self.plot_and_save_rewards(episode_reward)
             if (episode_idx + 1) % self.num_save_episode == 0:
-                print('Skipping saving model...')
-                # print('Done! Saving model...')
-                # self.agent.save_model()
+                # print('Skipping saving model...')
+                print('Done! Saving model...')
+                self.agent.save_model()
         
         self.plot_and_save_rewards(episode_reward)
 
@@ -176,12 +177,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='parameters for D3QN agent.')
     
     parser.add_argument('--agent_learn', type=ast.literal_eval, default=True, help='')
-    parser.add_argument('--max_episode_steps', type=int, default=70, help='')
-    parser.add_argument('--episodes', type=int, default=4000, help='')
+    parser.add_argument('--max_episode_steps', type=int, default=50, help='')
+    parser.add_argument('--episodes', type=int, default=3000, help='')
     parser.add_argument('--policy_lr', type=float, default=3e-4, help='')
     parser.add_argument('--Q_lr', type=float, default=3e-4, help='')
     parser.add_argument('--alpha_lr', type=float, default=3e-4, help='')
-    parser.add_argument('--reward_discount_rate', type=float, default=0.75, help='')
+    parser.add_argument('--reward_discount_rate', type=float, default=0., help='')
     
     parser.add_argument('--learnTimes', type=int, default=8, help='')
     parser.add_argument('--batch_size', type=int, default=128, help='')
@@ -191,7 +192,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_update_episode', type=int, default=1, help='')
     parser.add_argument('--softUpdate_tau', type=float, default=0.01, help='')
     
-    parser.add_argument('--base_model_dir', type=str, default='../model/base_model_fullData_wBN', help='')
+    parser.add_argument('--base_model_dir', type=str, default='../model/base_model_fullData_woBN', help='')
     parser.add_argument('--based_on_base_model', type=ast.literal_eval, default=True, help='')
     
     parser.add_argument('--agent_model_dir', type=str, default='../model/sac_model', help='')
